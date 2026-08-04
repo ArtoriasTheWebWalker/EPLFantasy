@@ -1,0 +1,57 @@
+/* =====================================================
+   TABLE & FIXTURES STYLES
+===================================================== */
+
+/* ---------- league table ---------- */
+.lg-wrap{
+  background:var(--panel);border:1px solid var(--line);
+  border-radius:13px;overflow:hidden;
+}
+.lg{width:100%;border-collapse:collapse;font-size:13px}
+.lg th{
+  font-family:var(--font-data);font-size:8px;font-weight:600;
+  letter-spacing:.13em;text-transform:uppercase;color:var(--chalk-dim);
+  padding:10px 6px;border-bottom:1px solid var(--line);text-align:right;
+}
+.lg th:nth-child(1),.lg th:nth-child(2){text-align:left}
+.lg td{padding:9px 6px;border-bottom:1px solid var(--line);text-align:right;font-family:var(--font-data);font-size:12px}
+.lg td:nth-child(2){text-align:left;font-family:var(--font-body);font-size:13.5px;font-weight:600}
+.lg tr:last-child td{border-bottom:0}
+.lg .pos{
+  width:26px;text-align:center;color:var(--chalk-dim);
+  font-size:11px;
+}
+.lg .pts{font-weight:700;color:var(--chalk)}
+.lg .tier{
+  display:inline-block;width:22px;padding:2px 0;border-radius:5px;
+  font-size:9px;font-weight:700;color:#0A1322;text-align:center;
+}
+
+/* ---------- fixtures ---------- */
+.team-fix{
+  background:var(--panel);border:1px solid var(--line);
+  border-radius:12px;padding:12px 13px;margin-bottom:9px;
+}
+.team-fix-head{
+  display:flex;align-items:center;gap:9px;margin-bottom:9px;
+}
+.team-fix-head .badge{
+  width:22px;height:22px;border-radius:5px;flex:0 0 auto;
+  background:var(--kit,#888);
+}
+.team-fix-head b{font-size:14px}
+.team-fix-head .pos-chip{
+  margin-left:auto;font-family:var(--font-data);font-size:9px;
+  color:var(--chalk-dim);letter-spacing:.08em;
+}
+.fix-strip{display:flex;gap:3px;overflow-x:auto;padding-bottom:4px;scrollbar-width:none}
+.fix-strip::-webkit-scrollbar{display:none}
+.fx{
+  flex:0 0 auto;min-width:40px;text-align:center;padding:5px 5px 4px;border-radius:7px;
+  background:color-mix(in srgb,var(--tc,#555) 22%,transparent);
+  border:1px solid var(--tc,#555);
+}
+.fx b{display:block;font-family:var(--font-data);font-size:9.5px;font-weight:700;color:var(--tc,#aaa)}
+.fx small{display:block;font-family:var(--font-data);font-size:7px;color:var(--chalk-dim);letter-spacing:.04em}
+.fx.past{filter:brightness(.5) saturate(.6)}
+.fx.far{--tc:#3d4757}

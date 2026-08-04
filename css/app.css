@@ -1,0 +1,321 @@
+/* =====================================================
+   FPL COMPANION — SHARED DESIGN SYSTEM
+   Every page inherits from this file.
+   Page-specific styles live in css/<page>.css
+===================================================== */
+
+@import url('https://fonts.googleapis.com/css2?family=Archivo+Black&family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@400;600;700&display=swap');
+
+:root{
+  /* surface */
+  --bg:#0A1322;
+  --panel:#0F1B2D;
+  --panel-2:#122135;
+  --line:rgba(255,255,255,.08);
+  --line-strong:rgba(255,255,255,.16);
+
+  /* text */
+  --chalk:#F2F7FD;
+  --chalk-dim:rgba(242,247,253,.55);
+
+  /* accents */
+  --lime:#94D552;
+  --orange:#FF8C42;
+  --sky:#4BA3FF;
+
+  /* grades */
+  --blue:#4BA3FF;
+  --green:#94D552;
+  --amber:#FFB703;
+  --red:#FF4D4F;
+
+  /* pitch */
+  --pitch-1:#16632F;
+  --pitch-2:#12562A;
+
+  /* fonts */
+  --font-display:'Archivo Black',system-ui,sans-serif;
+  --font-body:'Inter',system-ui,sans-serif;
+  --font-data:'JetBrains Mono',monospace;
+}
+
+*{box-sizing:border-box;margin:0;padding:0}
+
+body{
+  background:var(--bg);
+  color:var(--chalk);
+  font-family:var(--font-body);
+  -webkit-font-smoothing:antialiased;
+  padding-bottom:40px;
+}
+
+/* ---------- header + tabs ---------- */
+header{
+  position:sticky;top:0;z-index:40;
+  background:rgba(10,19,34,.94);
+  backdrop-filter:blur(10px);
+  border-bottom:1px solid var(--line);
+  padding:14px 18px 0;
+}
+.brand{
+  font-family:var(--font-display);
+  font-size:19px;letter-spacing:-.02em;
+  display:flex;align-items:center;gap:9px;
+}
+.brand .dot{width:9px;height:9px;border-radius:50%;background:var(--lime)}
+.brand .season{
+  font-family:var(--font-data);font-size:9.5px;font-weight:600;
+  letter-spacing:.14em;color:var(--chalk-dim);margin-left:auto;
+}
+.tabs{display:flex;gap:4px;margin-top:12px}
+.tab{
+  flex:1;padding:11px 0 12px;border:0;background:transparent;
+  color:var(--chalk-dim);font-family:var(--font-data);
+  font-size:10.5px;font-weight:600;letter-spacing:.13em;text-transform:uppercase;
+  cursor:pointer;border-bottom:2px solid transparent;transition:.15s;
+}
+.tab:hover{color:var(--chalk)}
+.tab.active{color:var(--lime);border-bottom-color:var(--lime)}
+
+/* ---------- layout ---------- */
+main{max-width:900px;margin:0 auto;padding:18px 16px 0}
+.page{display:none}
+.page.active{display:block}
+section{margin-bottom:28px}
+
+.sec-head{
+  display:flex;align-items:flex-end;justify-content:space-between;
+  gap:12px;margin-bottom:14px;flex-wrap:wrap;
+}
+.sec-head h2{
+  font-family:var(--font-display);font-size:17px;letter-spacing:-.01em;
+  display:flex;flex-direction:column;gap:5px;
+}
+.sec-head .tag{
+  font-family:var(--font-data);font-size:8.5px;font-weight:600;
+  letter-spacing:.16em;text-transform:uppercase;color:var(--lime);
+}
+.sec-head .hint{
+  font-family:var(--font-data);font-size:9.5px;
+  color:var(--chalk-dim);letter-spacing:.05em;
+}
+.mini-title{
+  font-family:var(--font-data);font-size:9.5px;font-weight:600;
+  letter-spacing:.16em;text-transform:uppercase;color:var(--chalk-dim);
+  margin:0 0 10px;
+}
+
+/* ---------- slide nav (used inside pages) ---------- */
+.slide-nav{
+  display:flex;gap:4px;background:var(--panel);
+  border:1px solid var(--line);border-radius:11px;padding:4px;margin-bottom:16px;
+}
+.snav{
+  flex:1;padding:9px 0;border:0;border-radius:8px;background:transparent;
+  color:var(--chalk-dim);font-family:var(--font-data);font-size:10px;
+  font-weight:600;letter-spacing:.1em;text-transform:uppercase;cursor:pointer;transition:.15s;
+}
+.snav.active{background:var(--slide-accent,var(--lime));color:#0A1322}
+.slide{display:none}
+.slide.active{display:block}
+
+/* ---------- gameweek pills ---------- */
+.gw-row{
+  display:flex;gap:6px;overflow-x:auto;padding-bottom:8px;margin-bottom:10px;
+  scrollbar-width:none;
+}
+.gw-row::-webkit-scrollbar{display:none}
+.gw{
+  flex:0 0 auto;padding:7px 13px;border-radius:8px;
+  border:1px solid var(--line);background:var(--panel);
+  color:var(--chalk-dim);font-family:var(--font-data);font-size:10.5px;
+  font-weight:600;letter-spacing:.06em;cursor:pointer;transition:.15s;
+}
+.gw:hover{border-color:var(--line-strong);color:var(--chalk)}
+.gw.active{background:var(--lime);border-color:var(--lime);color:#0A1322}
+.gw.season-btn{border-style:dashed}
+.gw.season-btn.active{background:var(--orange);border-color:var(--orange);color:#1a0f05}
+.gw:disabled{opacity:.35;cursor:not-allowed}
+
+/* ---------- pitch ---------- */
+.pitch{
+  position:relative;border-radius:16px;padding:26px 10px 18px;
+  background:
+    repeating-linear-gradient(180deg,var(--pitch-1) 0 42px,var(--pitch-2) 42px 84px);
+  border:1px solid rgba(255,255,255,.1);
+  display:flex;flex-direction:column;gap:14px;overflow:hidden;
+}
+.pitch::before{
+  content:"";position:absolute;inset:8px;
+  border:2px solid rgba(255,255,255,.16);border-radius:10px;pointer-events:none;
+}
+.goalmouth{
+  position:absolute;top:8px;left:50%;transform:translateX(-50%);
+  width:120px;height:34px;border:2px solid rgba(255,255,255,.16);
+  border-top:0;border-radius:0 0 8px 8px;pointer-events:none;
+}
+.p-row{display:flex;justify-content:center;gap:8px;flex-wrap:wrap;position:relative;z-index:1}
+.p-row.gk{margin-top:14px}
+
+.bench{
+  margin-top:12px;padding:14px 12px;border-radius:14px;
+  background:var(--panel);border:1px solid var(--line);
+}
+.bench .mini-title{margin-bottom:10px}
+.bench-row{display:flex;gap:8px;flex-wrap:wrap;justify-content:center}
+
+/* ---------- player chip ---------- */
+.chip{
+  width:104px;background:rgba(8,16,28,.82);backdrop-filter:blur(2px);
+  border:1px solid var(--line);border-radius:12px;padding:8px 6px 7px;cursor:pointer;
+  text-align:center;color:var(--chalk);font-family:var(--font-body);position:relative;
+  transition:transform .15s,border-color .15s;
+  border-top:3px solid var(--grade,#888);
+}
+.chip:hover{transform:translateY(-2px);border-color:var(--line-strong)}
+.chip.g-blue{--grade:var(--blue)}
+.chip.g-green{--grade:var(--green)}
+.chip.g-amber{--grade:var(--amber)}
+.chip.g-red{--grade:var(--red)}
+
+.shirt{
+  width:40px;height:34px;margin:2px auto 0;border-radius:5px 5px 3px 3px;
+  background:var(--kit,#888);
+  clip-path:polygon(18% 0,32% 6%,68% 6%,82% 0,100% 16%,86% 30%,86% 100%,14% 100%,14% 30%,0 16%);
+}
+.pstripe{
+  font-family:var(--font-data);font-size:12px;font-weight:700;
+  padding:3px 0;border-radius:6px;margin:5px auto 4px;width:62px;
+  background:var(--grade,#888);color:#0A1322;
+}
+.pstripe small{font-size:7px;font-weight:600;letter-spacing:.08em}
+.chip .name{font-size:12px;font-weight:600;line-height:1.2;margin-bottom:2px}
+.chip .meta{font-family:var(--font-data);font-size:8px;color:var(--chalk-dim);letter-spacing:.04em}
+.capstar{
+  position:absolute;top:-6px;left:-4px;width:18px;height:18px;border-radius:50%;
+  background:var(--orange);color:#1a0f05;font-family:var(--font-data);
+  font-size:9px;font-weight:700;display:grid;place-items:center;
+}
+.in-tag{
+  position:absolute;top:-6px;right:-4px;background:var(--orange);color:#1a0f05;
+  font-family:var(--font-data);font-size:7.5px;font-weight:700;letter-spacing:.08em;
+  padding:2px 5px;border-radius:6px;
+}
+
+/* empty slot on the pitch */
+.slot{
+  width:104px;min-height:96px;border-radius:12px;
+  border:1px dashed rgba(255,255,255,.28);background:rgba(8,16,28,.4);
+  color:var(--chalk-dim);cursor:pointer;display:grid;place-items:center;
+  font-family:var(--font-data);font-size:9.5px;letter-spacing:.1em;
+  text-transform:uppercase;transition:.15s;padding:8px 4px;
+}
+.slot:hover{border-color:var(--lime);color:var(--lime)}
+.slot .plus{display:block;font-size:20px;line-height:1;margin-bottom:5px}
+
+.legend{
+  display:flex;gap:14px;flex-wrap:wrap;justify-content:center;
+  margin-top:12px;font-family:var(--font-data);font-size:9px;
+  color:var(--chalk-dim);letter-spacing:.06em;
+}
+.legend i{display:inline-block;width:9px;height:9px;border-radius:2px;margin-right:5px;vertical-align:-1px}
+
+/* ---------- tables ---------- */
+.tbl{width:100%;border-collapse:collapse;font-size:13px}
+.tbl th{
+  font-family:var(--font-data);font-size:8.5px;font-weight:600;
+  letter-spacing:.14em;text-transform:uppercase;color:var(--chalk-dim);
+  text-align:left;padding:9px 8px;border-bottom:1px solid var(--line);
+}
+.tbl td{padding:10px 8px;border-bottom:1px solid var(--line)}
+.tbl tr:last-child td{border-bottom:0}
+.tbl .num{font-family:var(--font-data);font-size:12px}
+
+/* ---------- modal ---------- */
+.overlay{
+  position:fixed;inset:0;background:rgba(3,8,16,.8);backdrop-filter:blur(3px);
+  display:none;align-items:center;justify-content:center;z-index:50;padding:20px;
+}
+.overlay.open{display:flex}
+.modal{
+  background:var(--panel);border:1px solid var(--line);border-radius:16px;
+  width:100%;max-width:440px;max-height:86vh;overflow:auto;
+  padding:22px;border-top:4px solid var(--grade,var(--lime));position:relative;
+}
+.modal h3{font-family:var(--font-display);font-size:19px;margin-bottom:4px}
+.m-meta{font-family:var(--font-data);font-size:10px;color:var(--chalk-dim);letter-spacing:.06em;margin-bottom:14px}
+.m-grade{
+  display:inline-block;padding:4px 10px;border-radius:7px;margin-bottom:14px;
+  background:var(--grade);color:#0A1322;font-family:var(--font-data);
+  font-size:9.5px;font-weight:700;letter-spacing:.12em;text-transform:uppercase;
+}
+.m-sec{margin-top:16px}
+.m-sec h4{
+  font-family:var(--font-data);font-size:8.5px;font-weight:600;
+  letter-spacing:.16em;text-transform:uppercase;color:var(--chalk-dim);margin-bottom:9px;
+}
+.break-row{
+  display:flex;justify-content:space-between;padding:7px 0;
+  border-bottom:1px dashed var(--line);font-size:13.5px;
+}
+.break-row:last-child{border-bottom:0}
+.break-row.total{font-weight:700;color:var(--lime);border-top:1px solid var(--line);margin-top:4px;padding-top:9px}
+.close-x{
+  position:absolute;top:14px;right:14px;width:28px;height:28px;border-radius:8px;
+  border:1px solid var(--line);background:var(--panel-2);color:var(--chalk-dim);
+  cursor:pointer;font-size:15px;line-height:1;
+}
+.close-x:hover{color:var(--chalk);border-color:var(--line-strong)}
+
+/* ---------- search box (shared: add player / add candidate) ---------- */
+.search-box input{
+  width:100%;background:var(--panel-2);border:1px solid var(--orange);border-radius:10px;
+  color:var(--chalk);font-family:var(--font-body);font-size:14px;padding:11px 12px;
+}
+.search-box input:focus{outline:none}
+.search-list{margin-top:8px;max-height:260px;overflow:auto}
+.search-opt{
+  display:flex;justify-content:space-between;align-items:center;width:100%;
+  padding:10px 12px;border-radius:9px;border:1px solid var(--line);background:var(--panel-2);
+  color:var(--chalk);cursor:pointer;margin-bottom:6px;text-align:left;
+}
+.search-opt:hover{border-color:var(--orange)}
+.search-opt b{font-size:13.5px}
+.search-opt span{font-family:var(--font-data);font-size:10px;color:var(--chalk-dim)}
+.hint-line{
+  font-family:var(--font-data);font-size:9.5px;color:var(--chalk-dim);
+  margin-top:8px;letter-spacing:.05em;line-height:1.5;
+}
+
+/* ---------- api status banner ---------- */
+.api-banner{
+  display:flex;align-items:center;gap:10px;
+  background:var(--panel);border:1px dashed var(--orange);border-radius:11px;
+  padding:11px 14px;margin-bottom:16px;
+  font-family:var(--font-data);font-size:10px;color:var(--chalk-dim);
+  letter-spacing:.05em;line-height:1.6;
+}
+.api-banner .ico{color:var(--orange);font-size:14px}
+.api-banner.ok{border-color:var(--lime);border-style:solid}
+.api-banner.ok .ico{color:var(--lime)}
+.api-banner.err{border-color:var(--red)}
+.api-banner.err .ico{color:var(--red)}
+
+.empty-note{
+  text-align:center;padding:28px 18px;color:var(--chalk-dim);
+  font-family:var(--font-data);font-size:10.5px;letter-spacing:.06em;line-height:1.7;
+}
+
+footer{
+  max-width:900px;margin:26px auto 0;padding:16px;
+  font-family:var(--font-data);font-size:9px;color:var(--chalk-dim);
+  letter-spacing:.05em;text-align:center;border-top:1px solid var(--line);
+}
+
+@media (max-width:640px){
+  .chip,.slot{width:88px}
+  .shirt{width:34px;height:29px}
+  .pstripe{width:54px;font-size:11px}
+  .chip .name{font-size:11px}
+  main{padding:14px 12px 0}
+}

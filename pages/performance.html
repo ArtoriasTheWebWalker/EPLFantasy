@@ -1,0 +1,73 @@
+<!-- =====================================================
+     PERFORMANCE PAGE
+     Your squad, how it actually did.
+     Edit this file alone to change this page's layout.
+===================================================== -->
+
+<div id="perfBanner"></div>
+
+<div class="slide-nav" style="--slide-accent:var(--lime)">
+  <button class="snav active" data-slide="p-squad">Squad</button>
+  <button class="snav" data-slide="p-captain">Captain record</button>
+  <button class="snav" data-slide="p-bench">Bench calls</button>
+  <button class="snav" data-slide="p-transfers">Transfers</button>
+</div>
+
+<div class="slides">
+
+  <!-- ---------- SQUAD ---------- -->
+  <div class="slide active" id="p-squad">
+
+    <div class="sec-head">
+      <h2><span class="tag">Matchday view</span>Squad on the pitch</h2>
+      <span class="hint" id="formationHint"></span>
+    </div>
+
+    <div class="gw-row" id="gwRow"></div>
+    <div class="stars-row" id="starsRow"></div>
+
+    <div class="pitch" id="pitchArea"><div class="goalmouth"></div></div>
+
+    <div class="bench">
+      <div class="mini-title">Bench</div>
+      <div class="bench-row" id="benchArea"></div>
+    </div>
+
+    <div class="legend">
+      <span><i style="background:var(--blue)"></i>Exceptional</span>
+      <span><i style="background:var(--green)"></i>Good</span>
+      <span><i style="background:var(--amber)"></i>Average</span>
+      <span><i style="background:var(--red)"></i>Underperformed</span>
+    </div>
+
+    <div class="squad-status" id="squadStatus"></div>
+  </div>
+
+  <!-- ---------- CAPTAIN ---------- -->
+  <div class="slide" id="p-captain">
+    <div class="sec-head">
+      <h2><span class="tag">Armband</span>Captain record</h2>
+      <span class="hint">Did the armband go to the right player?</span>
+    </div>
+    <div id="captainArea"></div>
+  </div>
+
+  <!-- ---------- BENCH ---------- -->
+  <div class="slide" id="p-bench">
+    <div class="sec-head">
+      <h2><span class="tag">Selection</span>Bench calls</h2>
+      <span class="hint">Points left on the bench, week by week</span>
+    </div>
+    <div id="benchCallsArea"></div>
+  </div>
+
+  <!-- ---------- TRANSFERS ---------- -->
+  <div class="slide" id="p-transfers">
+    <div class="sec-head">
+      <h2><span class="tag">In &amp; out</span>Transfer history</h2>
+      <span class="hint">Every swap, judged on what happened after</span>
+    </div>
+    <div id="transferArea"></div>
+  </div>
+
+</div>

@@ -1,0 +1,68 @@
+/* =====================================================
+   PERFORMANCE PAGE STYLES
+===================================================== */
+
+/* ---------- star players ---------- */
+.stars-row{display:grid;grid-template-columns:repeat(3,1fr);gap:10px;margin:2px 0 16px}
+.star-card{
+  background:var(--panel);border:1px solid var(--line);border-radius:12px;
+  padding:12px 14px;display:flex;gap:12px;align-items:center;
+  border-left:4px solid var(--sc,#888);
+}
+.star-card .ic{font-size:22px;line-height:1}
+.star-card .sc-label{
+  font-family:var(--font-data);font-size:8.5px;letter-spacing:.15em;
+  text-transform:uppercase;color:var(--chalk-dim);
+}
+.star-card .sc-name{font-weight:700;font-size:14px;margin-top:2px}
+.star-card .sc-pts{font-family:var(--font-data);font-size:10.5px;color:var(--sc,#aaa)}
+.star-card.gold{--sc:#FFD34D}
+.star-card.lime{--sc:var(--lime)}
+.star-card.down{--sc:var(--red)}
+@media (max-width:640px){.stars-row{grid-template-columns:1fr}}
+
+/* ---------- squad status under the pitch ---------- */
+.squad-status{
+  margin-top:14px;padding:12px 14px;border-radius:11px;
+  background:var(--panel);border:1px solid var(--line);
+  font-family:var(--font-data);font-size:10px;color:var(--chalk-dim);
+  letter-spacing:.05em;line-height:1.7;
+}
+.squad-status b{color:var(--chalk)}
+.squad-status .quota{display:flex;gap:14px;flex-wrap:wrap;margin-top:7px}
+.squad-status .quota span{color:var(--chalk-dim)}
+.squad-status .quota .done{color:var(--lime)}
+
+/* ---------- season modal ---------- */
+.gw-strip{display:flex;gap:4px;flex-wrap:wrap;margin-top:6px}
+.gw-cell{
+  width:40px;border-radius:7px;text-align:center;padding:5px 0 4px;
+  background:rgba(255,255,255,.05);border:1px solid var(--line);
+}
+.gw-cell b{display:block;font-family:var(--font-data);font-size:12px;font-weight:600}
+.gw-cell small{font-family:var(--font-data);font-size:7.5px;color:var(--chalk-dim);letter-spacing:.06em}
+.gw-cell.w-blue{border-color:var(--blue);color:var(--blue)}
+.gw-cell.w-green{border-color:var(--green);color:var(--green)}
+.gw-cell.w-amber{border-color:var(--amber);color:var(--amber)}
+.gw-cell.w-red{border-color:var(--red);color:var(--red)}
+
+.insight{
+  display:flex;gap:10px;align-items:flex-start;
+  padding:9px 0;border-bottom:1px dashed var(--line);font-size:13.5px;line-height:1.5;
+}
+.insight:last-child{border-bottom:0}
+.insight .em{flex:0 0 auto}
+
+/* ---------- modal actions ---------- */
+.m-actions{display:flex;gap:8px;margin-top:16px;flex-wrap:wrap}
+.m-btn{
+  flex:1;min-width:120px;padding:11px 0;border-radius:10px;cursor:pointer;
+  font-family:var(--font-data);font-size:10px;letter-spacing:.13em;text-transform:uppercase;
+  border:1px solid var(--line);background:var(--panel-2);color:var(--chalk-dim);
+}
+.m-btn:hover{color:var(--chalk);border-color:var(--line-strong)}
+.m-btn.warn{border-style:dashed;border-color:var(--orange);color:var(--orange);background:rgba(255,140,66,.08)}
+.m-btn.danger{border-color:var(--red);color:var(--red);background:rgba(255,77,79,.08)}
+.m-btn.on{background:var(--lime);border-color:var(--lime);color:#0A1322}
+
+.swap-panel{margin-top:12px}
