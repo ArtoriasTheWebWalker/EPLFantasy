@@ -66,3 +66,31 @@
 .m-btn.on{background:var(--lime);border-color:var(--lime);color:#0A1322}
 
 .swap-panel{margin-top:12px}
+
+/* ---------- vice-captain badge (chip) ---------- */
+.vicestar{
+  position:absolute;top:-6px;left:16px;width:18px;height:18px;border-radius:50%;
+  background:var(--sky);color:#04121f;font-family:var(--font-data);
+  font-size:9px;font-weight:700;display:grid;place-items:center;
+}
+
+/* ---------- captain record extras ---------- */
+.vtag{
+  font-family:var(--font-data);font-size:8px;letter-spacing:.08em;
+  color:var(--sky);text-transform:uppercase;
+}
+.cap-rate{
+  font-family:var(--font-data);font-size:10px;color:var(--chalk-dim);
+  margin-top:10px;letter-spacing:.05em;
+}
+.cap-rate b{color:var(--chalk)}
+
+/* ---------- drag & drop (XI <-> bench) ---------- */
+.chip.dragging{opacity:.35}
+.chip.drop-hover{outline:2px dashed var(--lime);outline-offset:2px}
+.drag-ghost{
+  position:fixed;left:0;top:0;z-index:1000;width:104px;
+  transform:translate(-50%,-50%);pointer-events:none;opacity:.92;
+  box-shadow:0 12px 34px rgba(0,0,0,.55);
+}
+@media (max-width:640px){ .drag-ghost{width:88px} }
