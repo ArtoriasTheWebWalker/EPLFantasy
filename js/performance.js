@@ -116,32 +116,105 @@ const Performance = {
         bench.appendChild(slotEl(pos, ()=>this.openAddPlayer(pos==='ADD'?null:pos)));
       }
     }
-
-    /* formation label */
-    const hint = document.getElementById('formationHint');
-    hint.textContent = Store.squad.length
-      ? `Formation ${Store.formation()} · tap a shirt for the breakdown`
-      : 'Tap a slot to add your first player';
   },
 
   nextNeededPosition(){
     return CONFIG.POS_ORDER.find(pos => Store.spaceFor(pos) > 0) || null;
   },
 
-  /* one chip, graded for the current view */
+  /* one chip, graded for the current view.
+     Tap opens the breakdown; drag swaps XI <-> bench (see makeInteractive). */
   playerChip(p){
     const g = Store.seasonMode ? Store.gradeSeason(p) : Store.gradeGW(p, Store.viewGW);
     const pts = g.pts;
 
-    return chipEl(p, {
+    const chip = chipEl(p, {
       grade  : g.grade,
       showCap: true,
       stripe : { text: pts === null ? '—' : `${pts} <small>PTS</small>` },
       meta   : Store.seasonMode
                  ? `${p.team} · season`
-                 : `${p.team} · £${p.price.toFixed(1)}m`,
-      onClick: () => this.openPlayer(p)
+                 : `${p.team} · £${p.price.toFixed(1)}m`
+      /* no onClick here — makeInteractive tells a tap from a drag */
     });
+
+    this.makeInteractive(chip, p);
+    return chip;
+  },
+
+  /* -------------------------------------------------
+     drag-and-drop (desktop + mobile via Pointer Events)
+       • a short press that doesn't move = a tap = open modal
+       • a press that moves past the threshold = a drag
+       • drop onto another shirt = Store.swapLineup(...)
+  ------------------------------------------------- */
+  makeInteractive(chip, p){
+    chip.style.touchAction = 'none';   // let us own the gesture on touch
+    const THRESH = 8;
+    let sx = 0, sy = 0, dragging = false, ghost = null, target = null;
+
+    const onMove = e => {
+      const dx = e.clientX - sx, dy = e.clientY - sy;
+      if(!dragging && Math.hypot(dx, dy) < THRESH) return;
+
+      if(!dragging){
+        dragging = true;
+        chip.classList.add('dragging');
+        ghost = chip.cloneNode(true);
+        ghost.classList.add('drag-ghost');
+        ghost.classList.remove('dragging');
+        ghost.removeAttribute('data-pid');
+        document.body.appendChild(ghost);
+      }
+      ghost.style.left = e.clientX + 'px';
+      ghost.style.top  = e.clientY + 'px';
+
+      const t = this.chipUnder(e.clientX, e.clientY, chip);
+      if(t !== target){
+        target?.classList.remove('drop-hover');
+        target = t;
+        target?.classList.add('drop-hover');
+      }
+    };
+
+    const onUp = e => {
+      chip.removeEventListener('pointermove', onMove);
+      chip.removeEventListener('pointerup', onUp);
+      chip.removeEventListener('pointercancel', onUp);
+
+      if(!dragging){ this.openPlayer(p); return; }   // it was a tap
+
+      chip.classList.remove('dragging');
+      ghost?.remove(); ghost = null;
+      target?.classList.remove('drop-hover');
+
+      const drop = this.chipUnder(e.clientX, e.clientY, chip);
+      if(drop){
+        const otherId = +drop.dataset.pid;
+        const r = Store.swapLineup(p.id, otherId);
+        if(!r.ok && r.reason) alert(r.reason);
+        this.render();
+      }
+    };
+
+    chip.addEventListener('pointerdown', e => {
+      if(e.pointerType === 'mouse' && e.button !== 0) return;   // left button only
+      sx = e.clientX; sy = e.clientY; dragging = false; target = null;
+      chip.setPointerCapture?.(e.pointerId);
+      chip.addEventListener('pointermove', onMove);
+      chip.addEventListener('pointerup', onUp);
+      chip.addEventListener('pointercancel', onUp);
+    });
+  },
+
+  /* topmost squad chip under a screen point, ignoring the dragged one */
+  chipUnder(x, y, exclude){
+    const els = document.elementsFromPoint(x, y);
+    for(const el of els){
+      const c = el.closest?.('.chip');
+      if(c && c !== exclude && !c.classList.contains('drag-ghost') && c.dataset.pid) return c;
+    }
+    return null;
   },
 
   /* -------------------------------------------------
@@ -188,7 +261,7 @@ const Performance = {
   },
 
   /* -------------------------------------------------
-     squad completeness readout
+     squad completeness readout (now carries squad value)
   ------------------------------------------------- */
   renderStatus(){
     const el = document.getElementById('squadStatus');
@@ -198,11 +271,12 @@ const Performance = {
     }).join('');
 
     const n = Store.squad.length;
+    const val = Store.squadValue();
     const issues = n === CONFIG.SQUAD.TOTAL ? Store.formationIssues() : [];
 
     const head = n === CONFIG.SQUAD.TOTAL
-      ? `<b>Squad complete</b> — 15 players, ${Store.starters().length} starting, ${Store.bench().length} on the bench. Formation <b>${Store.formation()}</b>.`
-      : `<b>${n}/${CONFIG.SQUAD.TOTAL} players added.</b> Tap a slot on the pitch to add the rest.`;
+      ? `<b>Squad complete</b> · ${Store.starters().length} starting · ${Store.bench().length} benched · Formation <b>${Store.formation()}</b> · Value <b>£${val.toFixed(1)}m</b>`
+      : `<b>${n}/${CONFIG.SQUAD.TOTAL} players</b> · Value <b>£${val.toFixed(1)}m</b>`;
 
     const warn = issues.length
       ? `<div style="color:var(--amber);margin-top:7px">Your XI ${issues.join(', ')}.</div>`
@@ -218,8 +292,7 @@ const Performance = {
     const targetPos = pos && Store.spaceFor(pos) > 0 ? pos : this.nextNeededPosition();
     if(!targetPos){
       Modal.open(`<h3>Squad is full</h3>
-        <div class="m-meta">15 players · 2 GK, 5 DEF, 5 MID, 3 FWD</div>
-        <p class="hint-line">To bring someone new in, open a player and use Transfer.</p>`);
+        <div class="m-meta">15 players · 2 GK, 5 DEF, 5 MID, 3 FWD</div>`);
       return;
     }
 
@@ -270,10 +343,13 @@ const Performance = {
       ${g.grade ? `<span class="m-grade" style="--grade:var(--${g.grade})">${CONFIG.GRADE_WORD[g.grade]}</span>` : ''}
 
       ${h ? `<div class="m-sec"><h4>Points breakdown</h4>${breakdown}</div>`
-          : `<div class="hint-line">No gameweek data yet — it arrives with the FPL connection.</div>`}
+          : `<div class="hint-line">No data for GW${Store.viewGW} yet.</div>`}
 
       <div class="m-actions">
-        <button class="m-btn ${p.cap?'on':''}" id="btnCap">${p.cap?'Captain':'Make captain'}</button>
+        <button class="m-btn ${p.cap?'on':''}" id="btnCap">${p.cap?'Captain ✓':'Make captain'}</button>
+        <button class="m-btn ${p.vice?'on':''}" id="btnVice">${p.vice?'Vice ✓':'Make vice'}</button>
+      </div>
+      <div class="m-actions">
         <button class="m-btn" id="btnStart">${p.start?'Move to bench':'Move to XI'}</button>
       </div>
       <div class="m-actions">
@@ -307,8 +383,12 @@ const Performance = {
         <div class="m-sec"><h4>Scouting report — ${Store.seasonTotal(p)} pts in ${hist.length} weeks</h4>
           ${insights.map(([em,tx])=>`<div class="insight"><span class="em">${em}</span><span>${tx}</span></div>`).join('')}
         </div>`
-      : `<div class="hint-line">Season history arrives with the FPL connection.</div>`}
+      : `<div class="hint-line">No season history yet.</div>`}
 
+      <div class="m-actions">
+        <button class="m-btn ${p.cap?'on':''}" id="btnCap">${p.cap?'Captain ✓':'Make captain'}</button>
+        <button class="m-btn ${p.vice?'on':''}" id="btnVice">${p.vice?'Vice ✓':'Make vice'}</button>
+      </div>
       <div class="m-actions">
         <button class="m-btn warn" id="btnSwap">⇄ Transfer this player</button>
         <button class="m-btn danger" id="btnRemove">Remove</button>
@@ -400,6 +480,9 @@ const Performance = {
     const cap = document.getElementById('btnCap');
     if(cap) cap.onclick = () => { Store.setCaptain(p.id); Modal.close(); this.render(); };
 
+    const vice = document.getElementById('btnVice');
+    if(vice) vice.onclick = () => { Store.setVice(p.id); Modal.close(); this.render(); };
+
     const st = document.getElementById('btnStart');
     if(st) st.onclick = () => {
       const r = Store.toggleStart(p.id);
@@ -425,7 +508,6 @@ const Performance = {
       pos: p.pos,
       exclude: Store.squad.map(x=>x.id),
       placeholder: `Replace ${p.name} with…`,
-      note: `FPL only allows same-position transfers, so this list is ${CONFIG.POS_LABEL[p.pos].toLowerCase()} only. His season history backfills automatically.`,
       onPick: player => {
         const res = Store.transfer(p.id, player, Store.viewGW);
         if(!res.ok){ alert(res.reason); return; }
@@ -450,29 +532,37 @@ const Performance = {
     const weeks = this.playedWeeks();
 
     if(!weeks.length){
-      el.innerHTML = emptyNote('Captain record builds up once gameweeks are played.<br>Each week it compares your armband pick against the best scorer in your squad.');
+      el.innerHTML = emptyNote('No gameweeks played yet.');
       return;
     }
 
+    let hits = 0, counted = 0;
+
     const rows = weeks.map(gw=>{
-      const capP = Store.squad.find(p=>p.cap);
+      const eff  = Store.effectiveCaptain(gw);
+      const capP = eff.player;
       const best = Store.squad
         .map(p=>({ p, pts: Store.pointsIn(p, gw) ?? 0 }))
         .sort((a,b)=>b.pts-a.pts)[0];
       const capPts = capP ? (Store.pointsIn(capP, gw) ?? 0) : 0;
       const right  = capP && best && capP.id === best.p.id;
+      if(capP){ counted++; if(right) hits++; }
+
       return `<tr>
         <td class="num">GW${gw}</td>
-        <td>${capP ? capP.name : '—'}</td>
+        <td>${capP ? capP.name : '—'}${eff.fallback ? ' <span class="vtag">via vice</span>' : ''}</td>
         <td class="num">${capPts*2}</td>
         <td>${best ? `${best.p.name} (${best.pts})` : '—'}</td>
         <td style="color:var(--${right?'lime':'amber'})">${right?'Right call':'Missed'}</td>
       </tr>`;
     }).join('');
 
+    const rate = counted ? Math.round(hits/counted*100) : 0;
+
     el.innerHTML = `<table class="tbl">
       <thead><tr><th>GW</th><th>Captain</th><th>Pts ×2</th><th>Best in squad</th><th>Verdict</th></tr></thead>
-      <tbody>${rows}</tbody></table>`;
+      <tbody>${rows}</tbody></table>
+      <div class="cap-rate">Right call in <b>${hits}/${counted}</b> weeks · <b>${rate}%</b></div>`;
   },
 
   renderBenchCalls(){
@@ -480,7 +570,7 @@ const Performance = {
     const weeks = this.playedWeeks();
 
     if(!weeks.length){
-      el.innerHTML = emptyNote('Bench calls appear once gameweeks are played.<br>Each week it checks whether your best bench player outscored your weakest starter.');
+      el.innerHTML = emptyNote('No gameweeks played yet.');
       return;
     }
 
@@ -511,7 +601,7 @@ const Performance = {
     const joined = Store.squad.filter(p=>p.inGW);
 
     if(!joined.length){
-      el.innerHTML = emptyNote('No transfers yet.<br>Open any player and use <b>Transfer this player</b> — every swap is logged here and judged on the points each side scored afterwards.');
+      el.innerHTML = emptyNote('No transfers yet.');
       return;
     }
 
@@ -527,8 +617,7 @@ const Performance = {
 
     el.innerHTML = `<table class="tbl">
       <thead><tr><th>In at</th><th>Player</th><th>Pts since</th><th>Pos</th></tr></thead>
-      <tbody>${rows}</tbody></table>
-      <div class="hint-line">Points for the outgoing player are tracked once the API connection is live, so each swap can be judged both ways.</div>`;
+      <tbody>${rows}</tbody></table>`;
   },
 
   playedWeeks(){
