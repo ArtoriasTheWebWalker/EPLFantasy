@@ -37,13 +37,15 @@ export function shirtHTML(team){
     grade     : 'blue'|'green'|'amber'|'red'|null
     meta      : small line under the name
     onClick   : handler
-    showCap   : draw the captain badge
+    showCap   : draw the captain / vice badges
 */
 export function chipEl(player, opts={}){
   const el = document.createElement('button');
   el.className = 'chip' + (opts.grade ? ` g-${opts.grade}` : '');
+  el.dataset.pid = player.id;                 // used by drag-and-drop hit testing
   el.innerHTML = `
-    ${opts.showCap && player.cap ? '<span class="capstar">C</span>' : ''}
+    ${opts.showCap && player.cap  ? '<span class="capstar">C</span>'  : ''}
+    ${opts.showCap && player.vice ? '<span class="vicestar">V</span>' : ''}
     ${player.inGW ? `<span class="in-tag">IN GW${player.inGW}</span>` : ''}
     ${shirtHTML(player.team)}
     ${opts.stripe ? `<div class="pstripe ${opts.stripe.className||''}">${opts.stripe.text}</div>` : ''}
@@ -62,22 +64,13 @@ export function slotEl(pos, onClick){
   return el;
 }
 
-/* ---------- api banner ---------- */
+/* ---------- api banner (short status only) ---------- */
 
 export function apiBanner(state){
   const map = {
-    offline: {
-      cls:'', ico:'⚡',
-      msg:`LOCAL MODE — no FPL connection yet. Set <b>API_PROXY</b> in <b>js/config.js</b> and everything below fills itself in. Your squad and notes are saved in this browser either way.`
-    },
-    ok: {
-      cls:'ok', ico:'●',
-      msg:`Connected to the FPL API · ${CONFIG.SEASON} · data refreshes daily at 0${CONFIG.REFRESH_HOUR}:00`
-    },
-    error: {
-      cls:'err', ico:'!',
-      msg:`Could not reach the FPL API. ${Store.lastError||''} Working from saved data.`
-    }
+    offline: { cls:'',    ico:'⚡', msg:`Local mode` },
+    ok:      { cls:'ok',  ico:'●', msg:`Connected · ${CONFIG.SEASON}` },
+    error:   { cls:'err', ico:'!', msg:`Offline — using saved data` }
   };
   const s = map[state] || map.offline;
   return `<div class="api-banner ${s.cls}"><span class="ico">${s.ico}</span><span>${s.msg}</span></div>`;
@@ -96,7 +89,7 @@ export function searchBox({ pos, exclude=[], placeholder, onPick, note }){
       <input id="${id}-input" type="text" autocomplete="off"
              placeholder="${placeholder || `Search ${CONFIG.POS_LABEL[pos]?.toLowerCase() || 'players'}…`}">
       <div class="search-list" id="${id}-list"></div>
-      <div class="hint-line">${note || `Type a name to filter. The list comes from the FPL API — in local mode it stays empty until the connection is wired up.`}</div>
+      ${note ? `<div class="hint-line">${note}</div>` : ''}
     </div>`;
 
   /* call after inserting html into the DOM */
@@ -116,7 +109,7 @@ export function searchBox({ pos, exclude=[], placeholder, onPick, note }){
         .slice(0, 40);
 
       if(!hits.length){
-        list.innerHTML = `<div class="hint-line">No ${pos||'player'} matching “${q}”${Store.pool.length ? '' : ' — the player list is empty until the FPL API is connected'}.</div>`;
+        list.innerHTML = `<div class="hint-line">No ${pos||'player'} matching “${q}”.</div>`;
         return;
       }
       list.innerHTML = hits.map(p=>`
