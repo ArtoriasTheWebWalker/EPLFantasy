@@ -40,6 +40,7 @@ const SquadShape = `
     id, name, team, teamId, pos, price,
     start:  true|false,     // in the XI or on the bench
     cap:    true|false,     // captain
+    vice:   true|false,     // vice-captain (2x if captain plays 0 mins)
     inGW:   null|number,    // gameweek he joined the squad
     history: [ { gw, points, ... } ]   // filled from the API
   }`;
@@ -115,6 +116,9 @@ export const Store = {
 
   has(id){ return this.squad.some(p=>p.id===id); },
 
+  /* total squad value, £m */
+  squadValue(){ return this.squad.reduce((a,p)=>a + (p.price||0), 0); },
+
   /* Add a player to a position slot.
      Enforces the FPL quota: 2 GK, 5 DEF, 5 MID, 3 FWD. */
   addPlayer(poolPlayer, { start=null } = {}){
@@ -140,6 +144,7 @@ export const Store = {
       price: poolPlayer.price,
       start: startFlag,
       cap: false,
+      vice: false,
       inGW: null,
       history: []
     });
@@ -172,6 +177,7 @@ export const Store = {
       price: poolPlayer.price,
       start: out.start,
       cap: false,
+      vice: out.vice,
       inGW: gw ?? this.currentGW,
       history: []
     };
@@ -182,7 +188,18 @@ export const Store = {
   },
 
   setCaptain(id){
-    this.squad.forEach(p=>{ p.cap = (p.id===id); });
+    this.squad.forEach(p=>{
+      p.cap = (p.id===id);
+      if(p.id===id) p.vice = false;   // captain can't also be vice
+    });
+    this.persistSquad();
+  },
+
+  setVice(id){
+    this.squad.forEach(p=>{
+      p.vice = (p.id===id);
+      if(p.id===id) p.cap = false;    // vice can't also be captain
+    });
     this.persistSquad();
   },
 
@@ -216,6 +233,61 @@ export const Store = {
     }
     this.persistSquad();
     return { ok:true };
+  },
+
+  /* -------------------------------------------------
+     swapLineup — drag one shirt onto another.
+       • same start-status (both XI or both bench) → cosmetic reorder
+       • one starter + one bench → move them into/out of the XI,
+         but only if the resulting formation is still legal.
+     Returns { ok, reason?, swapped?, reorder? }.
+  ------------------------------------------------- */
+  swapLineup(idA, idB){
+    if(idA === idB) return { ok:false };
+    const a = this.squad.find(p=>p.id===idA);
+    const b = this.squad.find(p=>p.id===idB);
+    if(!a || !b) return { ok:false, reason:'Player not found' };
+
+    /* both on the same side → just reorder for tidiness */
+    if(a.start === b.start){
+      const from = this.squad.indexOf(a);
+      this.squad.splice(from, 1);
+      const to = this.squad.indexOf(b);
+      this.squad.splice(to + (from <= to ? 0 : 1), 0, a);
+      this.persistSquad();
+      return { ok:true, reorder:true };
+    }
+
+    /* one in, one out → try the swap, validate, revert if illegal */
+    const sA = a.start, sB = b.start;
+    a.start = !sA;
+    b.start = !sB;
+
+    const issue = this._lineupIssue();
+    if(issue){
+      a.start = sA; b.start = sB;      // revert
+      return { ok:false, reason:issue };
+    }
+    this.persistSquad();
+    return { ok:true, swapped:true };
+  },
+
+  /* validates the current XI for drag-drop; returns a message or null.
+     Relaxed while the squad is still being built (under 15). */
+  _lineupIssue(){
+    const gk = this.countStart('GK');
+    if(gk > 1) return 'Only one goalkeeper can start.';
+
+    if(this.squad.length !== CONFIG.SQUAD.TOTAL) return null;   // still building
+
+    if(gk !== 1) return 'Exactly one goalkeeper must start.';
+    for(const pos of ['DEF','MID','FWD']){
+      if(this.countStart(pos) < this.MIN_START[pos])
+        return `A legal XI needs at least ${this.MIN_START[pos]} ${CONFIG.POS_LABEL[pos].toLowerCase()}.`;
+    }
+    if(this.starters().length !== CONFIG.SQUAD.STARTERS)
+      return `The XI must have ${CONFIG.SQUAD.STARTERS} players.`;
+    return null;
   },
 
   /* current formation, e.g. "4-4-2" */
@@ -308,6 +380,23 @@ export const Store = {
   pointsIn(player, gw){
     const h = player.history?.find(x=>x.gw===gw);
     return h ? h.points : null;
+  },
+
+  /* minutes a squad player played in one gameweek */
+  minutesIn(player, gw){
+    const h = player.history?.find(x=>x.gw===gw);
+    return h ? (h.minutes ?? 0) : null;
+  },
+
+  /* who actually gets the 2x for a gameweek.
+     If the captain played 0 minutes that week, the vice takes over. */
+  effectiveCaptain(gw){
+    const cap  = this.squad.find(p=>p.cap);
+    const vice = this.squad.find(p=>p.vice);
+    if(!cap) return { player:null, fallback:false };
+    const capMin = this.minutesIn(cap, gw);
+    if(vice && capMin === 0) return { player:vice, fallback:true };
+    return { player:cap, fallback:false };
   },
 
   seasonTotal(player){
