@@ -98,10 +98,23 @@ const Performance = {
     const benched = Store.bench();
     benched.forEach(p => bench.appendChild(this.playerChip(p)));
 
+    /* Empty bench slots — label each with a position that still
+       has room, so an empty squad doesn't show four GK slots.
+       We tally what's already placed (starters + bench) and hand
+       out the leftover quota in GK, DEF, MID, FWD order. */
     const benchMissing = CONFIG.SQUAD.BENCH - benched.length;
-    for(let i=0;i<benchMissing;i++){
-      const nextPos = this.nextNeededPosition();
-      bench.appendChild(slotEl(nextPos || 'ADD', ()=>this.openAddPlayer(nextPos)));
+    if(benchMissing > 0){
+      const remaining = [];
+      CONFIG.POS_ORDER.forEach(pos=>{
+        for(let i=0;i<Store.spaceFor(pos);i++) remaining.push(pos);
+      });
+      /* the pitch already claims the outfield minimums, so bench
+         slots should advertise what's left after those */
+      const forBench = remaining.slice(-benchMissing);
+      for(let i=0;i<benchMissing;i++){
+        const pos = forBench[i] || 'ADD';
+        bench.appendChild(slotEl(pos, ()=>this.openAddPlayer(pos==='ADD'?null:pos)));
+      }
     }
 
     /* formation label */
