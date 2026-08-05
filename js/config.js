@@ -19,7 +19,7 @@ export const CONFIG = {
      request. Set it to your own proxy when you have one.
   ------------------------------- */
   API_PROXY: '',                                         // e.g. 'https://corsproxy.io/?'
-  API_BASE : 'https://fantasy.premierleague.com/api',
+  API_BASE : 'https://fpl-proxy-abc.abdulelah12012.workers.dev',
 
   ENDPOINTS: {
     bootstrap : '/bootstrap-static/',      // all players, teams, current GW
