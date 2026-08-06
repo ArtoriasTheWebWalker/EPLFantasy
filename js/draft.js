@@ -157,7 +157,7 @@ const Draft = {
 
       const listHost = sec.querySelector(`#cl-${pos}`);
       if(!list.length){
-        listHost.innerHTML = `<div class="hint-line">No ${CONFIG.POS_LABEL[pos].toLowerCase()} on the shortlist yet.</div>`;
+        listHost.innerHTML = `<div class="hint-line" style="padding:6px 0 2px">No ${CONFIG.POS_LABEL[pos].toLowerCase()} on the shortlist yet.</div>`;
       }else{
         list.forEach(c=>listHost.appendChild(this.candidateCard(c)));
       }

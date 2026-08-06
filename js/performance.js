@@ -10,20 +10,44 @@ import { API }    from './api.js';
 import { Store }  from './store.js';
 import { Modal, chipEl, slotEl, searchBox, apiBanner, emptyNote } from './ui.js';
 
+/* concrete grade colours (kept in sync with css :root) — used where an
+   inline SVG needs a real colour value rather than a CSS variable */
+const GRADE_HEX = { blue:'#4FB8FF', green:'#4BE58A', amber:'#FFC43D', red:'#FF5A72', lime:'#B6FF3D' };
+
 const Performance = {
 
   /* -------------------------------------------------
      mount — runs once, wires listeners
   ------------------------------------------------- */
   mount(){
-    document.querySelectorAll('#page-performance .snav').forEach(btn=>{
+    const nav   = document.querySelector('#page-performance .slide-nav');
+    const snavs = document.querySelectorAll('#page-performance .snav');
+
+    /* move the gliding indicator pill onto a button */
+    const move = (btn, instant) => {
+      if(!btn || !nav) return;
+      if(instant) nav.classList.add('no-anim');
+      nav.style.setProperty('--ind-x', btn.offsetLeft   + 'px');
+      nav.style.setProperty('--ind-y', btn.offsetTop    + 'px');
+      nav.style.setProperty('--ind-w', btn.offsetWidth  + 'px');
+      nav.style.setProperty('--ind-h', btn.offsetHeight + 'px');
+      if(instant) requestAnimationFrame(()=>requestAnimationFrame(()=>nav.classList.remove('no-anim')));
+    };
+
+    snavs.forEach(btn=>{
       btn.onclick = () => {
-        document.querySelectorAll('#page-performance .snav').forEach(b=>b.classList.remove('active'));
+        snavs.forEach(b=>b.classList.remove('active'));
         btn.classList.add('active');
         document.querySelectorAll('#page-performance .slide').forEach(s=>s.classList.remove('active'));
         document.getElementById(btn.dataset.slide).classList.add('active');
+        move(btn);
       };
     });
+
+    /* snap the indicator under the active tab, and keep it aligned on resize */
+    const settle = () => move(document.querySelector('#page-performance .snav.active') || snavs[0], true);
+    settle();
+    window.addEventListener('resize', settle);
   },
 
   /* -------------------------------------------------
@@ -31,6 +55,7 @@ const Performance = {
   ------------------------------------------------- */
   render(){
     document.getElementById('perfBanner').innerHTML = apiBanner(Store.apiState || 'offline');
+    this.renderHero();
     this.renderGWRow();
     this.renderStars();
     this.renderPitch();
@@ -98,23 +123,10 @@ const Performance = {
     const benched = Store.bench();
     benched.forEach(p => bench.appendChild(this.playerChip(p)));
 
-    /* Empty bench slots — label each with a position that still
-       has room, so an empty squad doesn't show four GK slots.
-       We tally what's already placed (starters + bench) and hand
-       out the leftover quota in GK, DEF, MID, FWD order. */
     const benchMissing = CONFIG.SQUAD.BENCH - benched.length;
-    if(benchMissing > 0){
-      const remaining = [];
-      CONFIG.POS_ORDER.forEach(pos=>{
-        for(let i=0;i<Store.spaceFor(pos);i++) remaining.push(pos);
-      });
-      /* the pitch already claims the outfield minimums, so bench
-         slots should advertise what's left after those */
-      const forBench = remaining.slice(-benchMissing);
-      for(let i=0;i<benchMissing;i++){
-        const pos = forBench[i] || 'ADD';
-        bench.appendChild(slotEl(pos, ()=>this.openAddPlayer(pos==='ADD'?null:pos)));
-      }
+    for(let i=0;i<benchMissing;i++){
+      const nextPos = this.nextNeededPosition();
+      bench.appendChild(slotEl(nextPos || 'ADD', ()=>this.openAddPlayer(nextPos)));
     }
   },
 
@@ -261,6 +273,66 @@ const Performance = {
   },
 
   /* -------------------------------------------------
+     hero stat bar — big glowing headline numbers
+  ------------------------------------------------- */
+  renderHero(){
+    const el = document.getElementById('heroStats');
+    if(!el) return;
+
+    if(!Store.squad.length){ el.innerHTML = ''; return; }
+
+    const seasonPts = Store.squad.reduce((a,p)=>a + Store.seasonTotal(p), 0);
+    const value     = Store.squad.reduce((a,p)=>a + (p.price||0), 0);
+    const weeks     = this.playedWeeks().length;
+    const gwPts     = Store.starters().reduce((a,p)=>a + ((Store.pointsIn(p, Store.viewGW) ?? 0) * (p.cap?2:1)), 0);
+
+    const third = Store.seasonMode
+      ? ['Points / week', weeks ? (seasonPts/weeks).toFixed(1) : '—', 'violet']
+      : [`GW${Store.viewGW} points`, gwPts, 'violet'];
+
+    const tiles = [
+      ['Season points', seasonPts, 'lime'],
+      ['Squad value', '£' + value.toFixed(1) + 'm', 'cyan'],
+      third
+    ];
+
+    el.innerHTML = tiles.map(([label,val,accent])=>`
+      <div class="hero-tile a-${accent}">
+        <div class="ht-label">${label}</div>
+        <div class="ht-val">${val}</div>
+      </div>`).join('');
+  },
+
+  /* -------------------------------------------------
+     form sparkline — tiny inline trend chart
+  ------------------------------------------------- */
+  sparklineSVG(history, color){
+    const pts = (history||[]).map(h=>h.points);
+    if(pts.length < 2) return '';
+
+    const w=100, h=32, pad=3;
+    const min=Math.min(...pts), max=Math.max(...pts), rng=Math.max(1, max-min);
+    const stepX=(w - pad*2)/(pts.length - 1);
+    const coords=pts.map((v,i)=>[ pad + i*stepX, pad + (h - pad*2)*(1 - (v-min)/rng) ]);
+
+    const line=coords.map((c,i)=>(i?'L':'M') + c[0].toFixed(1) + ' ' + c[1].toFixed(1)).join(' ');
+    const area=`${line} L ${coords.at(-1)[0].toFixed(1)} ${h-pad} L ${coords[0][0].toFixed(1)} ${h-pad} Z`;
+    const last=coords.at(-1);
+    const uid='sl' + Math.random().toString(36).slice(2,7);
+
+    return `<svg class="sparkline" viewBox="0 0 ${w} ${h}" preserveAspectRatio="none" aria-hidden="true">
+      <defs><linearGradient id="${uid}" x1="0" y1="0" x2="0" y2="1">
+        <stop offset="0%" stop-color="${color}" stop-opacity="0.34"/>
+        <stop offset="100%" stop-color="${color}" stop-opacity="0"/>
+      </linearGradient></defs>
+      <path d="${area}" fill="url(#${uid})"/>
+      <path d="${line}" fill="none" stroke="${color}" stroke-width="2"
+            stroke-linecap="round" stroke-linejoin="round" vector-effect="non-scaling-stroke"/>
+      <circle cx="${last[0].toFixed(1)}" cy="${last[1].toFixed(1)}" r="2.6" fill="${color}"/>
+    </svg>`;
+  },
+
+  /* -------------------------------------------------
      squad completeness readout (now carries squad value)
   ------------------------------------------------- */
   renderStatus(){
@@ -336,17 +408,20 @@ const Performance = {
     const h = p.history?.find(x=>x.gw===Store.viewGW);
 
     const breakdown = h ? this.breakdownRows(h, p.pos) : '';
+    const spark = this.sparklineSVG(p.history, GRADE_HEX[g.grade] || GRADE_HEX.lime);
 
     Modal.open(`
       <h3>${p.name}</h3>
       <div class="m-meta">${p.team} · ${p.pos} · £${p.price.toFixed(1)}m · GW${Store.viewGW}</div>
       ${g.grade ? `<span class="m-grade" style="--grade:var(--${g.grade})">${CONFIG.GRADE_WORD[g.grade]}</span>` : ''}
 
+      ${spark ? `<div class="m-sec"><h4>Season form — last ${p.history.length} weeks</h4>${spark}</div>` : ''}
+
       ${h ? `<div class="m-sec"><h4>Points breakdown</h4>${breakdown}</div>`
           : `<div class="hint-line">No data for GW${Store.viewGW} yet.</div>`}
 
       <div class="m-actions">
-        <button class="m-btn ${p.cap?'on':''}" id="btnCap">${p.cap?'Captain ✓':'Make captain'}</button>
+        <button class="m-btn ${p.cap?'on':'primary'}" id="btnCap">${p.cap?'Captain ✓':'Make captain'}</button>
         <button class="m-btn ${p.vice?'on':''}" id="btnVice">${p.vice?'Vice ✓':'Make vice'}</button>
       </div>
       <div class="m-actions">
@@ -372,11 +447,14 @@ const Performance = {
     }).join('');
 
     const insights = this.scoutingReport(p);
+    const spark = this.sparklineSVG(hist, GRADE_HEX[g.grade] || GRADE_HEX.lime);
 
     Modal.open(`
       <h3>${p.name}</h3>
       <div class="m-meta">${p.team} · ${p.pos} · £${p.price.toFixed(1)}m · season to date</div>
       ${g.grade ? `<span class="m-grade" style="--grade:var(--${g.grade})">${CONFIG.GRADE_WORD[g.grade]} — season</span>` : ''}
+
+      ${spark ? `<div class="m-sec"><h4>Form trend</h4>${spark}</div>` : ''}
 
       ${hist.length ? `
         <div class="m-sec"><h4>Week by week</h4><div class="gw-strip">${cells}</div></div>
@@ -386,7 +464,7 @@ const Performance = {
       : `<div class="hint-line">No season history yet.</div>`}
 
       <div class="m-actions">
-        <button class="m-btn ${p.cap?'on':''}" id="btnCap">${p.cap?'Captain ✓':'Make captain'}</button>
+        <button class="m-btn ${p.cap?'on':'primary'}" id="btnCap">${p.cap?'Captain ✓':'Make captain'}</button>
         <button class="m-btn ${p.vice?'on':''}" id="btnVice">${p.vice?'Vice ✓':'Make vice'}</button>
       </div>
       <div class="m-actions">
