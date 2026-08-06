@@ -11,6 +11,7 @@ import { CONFIG } from './config.js';
 import { API }    from './api.js';
 import { Store }  from './store.js';
 import { Modal }  from './ui.js';
+import { Sync }   from './sync.js';
 
 const PAGES = ['performance','draft','table'];
 const loaded = {};
@@ -63,6 +64,14 @@ function initModal(){
   });
 }
 
+/* ---------- cross-device sync ---------- */
+
+function initSync(){
+  const btn = document.getElementById('syncBtn');
+  if(btn) btn.onclick = () => Sync.openSettings();
+  Sync.refreshButton();
+}
+
 /* =====================================================
    BOOT
 
@@ -79,9 +88,14 @@ async function boot(){
 
   initTabs();
   initModal();
+  initSync();
 
   /* first paint immediately, so the UI never waits on the network */
   await mountPage('performance');
+
+  /* pull the cloud copy (if sync is on) and reconcile before we
+     backfill history, so the API works against the right squad */
+  await Sync.boot();
 
   /* then try to bring the data in */
   const boot = await API.bootstrap();

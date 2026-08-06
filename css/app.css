@@ -126,12 +126,33 @@ header{
   -webkit-background-clip:text;background-clip:text;
   -webkit-text-fill-color:transparent;color:transparent;
 }
+.sync-btn{
+  margin-left:auto;
+  width:34px;height:34px;border-radius:10px;flex:0 0 auto;
+  border:1px solid var(--glass-brd);background:rgba(255,255,255,.04);
+  color:var(--chalk-dim);cursor:pointer;font-size:15px;line-height:1;
+  display:grid;place-items:center;backdrop-filter:var(--blur);
+  transition:color 160ms ease,border-color 160ms ease,background 160ms ease,box-shadow 160ms ease,transform 120ms var(--ease-out);
+}
+@media (hover:hover) and (pointer:fine){ .sync-btn:hover{color:var(--chalk);border-color:var(--glass-brd-strong);background:rgba(255,255,255,.08)} }
+.sync-btn:active{transform:scale(.93)}
+.sync-btn.synced{color:var(--lime);border-color:rgba(182,255,61,.4);box-shadow:0 0 16px -6px rgba(182,255,61,.7)}
+.sync-btn.offline{color:var(--orange);border-color:rgba(255,154,61,.4)}
+
 .brand .season{
   font-family:var(--font-data);font-size:9.5px;font-weight:600;
-  letter-spacing:.16em;color:var(--chalk-dim);margin-left:auto;
+  letter-spacing:.16em;color:var(--chalk-dim);margin-left:9px;
   padding:5px 9px;border-radius:999px;
   border:1px solid var(--glass-brd);background:rgba(255,255,255,.03);
 }
+
+.sync-input{
+  width:100%;background:rgba(255,255,255,.05);border:1px solid var(--glass-brd);border-radius:11px;
+  color:var(--chalk);font-family:var(--font-data);font-size:13px;padding:12px 13px;letter-spacing:.02em;
+  transition:border-color 160ms ease,box-shadow 160ms ease;
+}
+.sync-input:focus{outline:none;border-color:var(--cyan);box-shadow:0 0 0 3px rgba(61,232,255,.16)}
+.sync-input::placeholder{color:var(--chalk-faint)}
 .tabs{display:flex;gap:4px;margin-top:14px}
 .tab{
   flex:1;padding:12px 0 13px;border:0;background:transparent;

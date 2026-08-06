@@ -364,6 +364,32 @@ export const Store = {
   persistCands(){ save(CONFIG.STORE.cands, this.candidates); emit('candidates'); },
 
   /* =================================================
+     SYNC BRIDGE
+     The whole persisted state as one blob, and the
+     inverse — used by js/sync.js to mirror across
+     devices. importState writes local + re-renders.
+  ================================================= */
+
+  exportState(){
+    return {
+      squad:      this.squad,
+      draft:      this.draft,
+      candidates: this.candidates,
+    };
+  },
+
+  importState(s){
+    if(!s || typeof s !== 'object') return;
+    this.squad      = Array.isArray(s.squad) ? s.squad : [];
+    this.draft      = (s.draft && typeof s.draft === 'object') ? s.draft : {};
+    this.candidates = (s.candidates && typeof s.candidates === 'object') ? s.candidates : {};
+    save(CONFIG.STORE.squad, this.squad);
+    save(CONFIG.STORE.draft, this.draft);
+    save(CONFIG.STORE.cands, this.candidates);
+    emit('sync');
+  },
+
+  /* =================================================
      GRADING
      ratio = points / position average that gameweek
   ================================================= */
