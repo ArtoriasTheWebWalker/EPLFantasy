@@ -136,10 +136,37 @@ async function boot(){
   loaded[active]?.render?.();
 }
 
-/* re-render the visible page whenever the store changes */
-window.addEventListener('store:change', () => {
+/* re-render the visible page whenever the store changes — but never
+   yank a field out from under someone who's typing. Re-rendering rebuilds
+   the page's inputs, which blurs the focused one; on mobile that closes
+   the keyboard mid-word. So while a text field is focused we hold the
+   render and run it once they leave the field. */
+let pendingRender = false;
+
+function isTyping(){
+  const el = document.activeElement;
+  return !!el && (el.tagName === 'INPUT' || el.tagName === 'TEXTAREA' || el.isContentEditable);
+}
+
+function renderActive(){
   const active = document.querySelector('.tab.active')?.dataset.page;
   loaded[active]?.render?.();
+}
+
+window.addEventListener('store:change', () => {
+  if(isTyping()){ pendingRender = true; return; }
+  renderActive();
+});
+
+/* caught-up render once focus leaves the field (unless focus just moved
+   to another field — then keep holding) */
+document.addEventListener('focusout', () => {
+  if(!pendingRender) return;
+  setTimeout(() => {
+    if(isTyping()) return;          // moved to another input — keep waiting
+    pendingRender = false;
+    renderActive();
+  }, 0);
 });
 
 boot();
