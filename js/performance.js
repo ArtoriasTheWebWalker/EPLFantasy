@@ -194,7 +194,17 @@ const Performance = {
       chip.removeEventListener('pointerup', onUp);
       chip.removeEventListener('pointercancel', onUp);
 
-      if(!dragging){ this.openPlayer(p); return; }   // it was a tap
+      if(!dragging){
+        /* Touch devices fire a synthetic click ~300ms after release. It
+           hit-tests at the release point, and by then the modal we're
+           opening sits under the finger — so the ghost click lands on a
+           modal button (often Remove). Swallow that one stray click. */
+        const swallow = ev => { ev.stopPropagation(); ev.preventDefault(); };
+        document.addEventListener('click', swallow, { capture: true, once: true });
+        setTimeout(() => document.removeEventListener('click', swallow, true), 500);
+        this.openPlayer(p);
+        return;                                       // it was a tap
+      }
 
       chip.classList.remove('dragging');
       ghost?.remove(); ghost = null;
