@@ -52,6 +52,11 @@ const Performance = {
     window.addEventListener('resize', settle);
   },
 
+  /* is the viewed gameweek locked (past its deadline)?
+     Past GWs are read-only for squad/XI edits; only the armband
+     stays editable so mis-remembered captains can be corrected. */
+  isPastGW(){ return !Store.seasonMode && Store.viewGW < Store.currentGW; },
+
   render(){
     document.getElementById('perfBanner').innerHTML = apiBanner(Store.apiState || 'offline');
     this.renderHero();
@@ -88,7 +93,9 @@ const Performance = {
   },
 
   /* -------------------------------------------------
-     the pitch — editable via chip taps and drag-drop
+     the pitch — per-GW lineup. Past GWs read frozen
+     snapshots from Store.lineups[gw]; the current GW
+     reads the working state and stays editable.
   ------------------------------------------------- */
   renderPitch(){
     const pitch = document.getElementById('pitchArea');
@@ -96,7 +103,11 @@ const Performance = {
     pitch.innerHTML = '<div class="goalmouth"></div>';
     bench.innerHTML = '';
 
-    const starters = Store.starters();
+    const past = this.isPastGW();
+    const gw   = Store.seasonMode ? Store.currentGW : Store.viewGW;
+
+    const starters = past ? Store.startersForGW(gw) : Store.starters();
+    const benched  = past ? Store.benchForGW(gw)    : Store.bench();
 
     CONFIG.POS_ORDER.forEach(pos=>{
       const row = document.createElement('div');
@@ -105,22 +116,26 @@ const Performance = {
       const inRow = starters.filter(p=>p.pos===pos);
       inRow.forEach(p => row.appendChild(this.playerChip(p)));
 
-      const wanted  = Store.MIN_START[pos];
-      const missing = Math.max(0, Math.min(wanted - inRow.length, Store.spaceFor(pos)));
-      for(let i=0;i<missing;i++){
-        row.appendChild(slotEl(pos, ()=>this.openAddPlayer(pos)));
+      /* empty add-slots are current-GW only — past squads were fixed */
+      if(!past){
+        const wanted  = Store.MIN_START[pos];
+        const missing = Math.max(0, Math.min(wanted - inRow.length, Store.spaceFor(pos)));
+        for(let i=0;i<missing;i++){
+          row.appendChild(slotEl(pos, ()=>this.openAddPlayer(pos)));
+        }
       }
 
       if(row.children.length) pitch.appendChild(row);
     });
 
-    const benched = Store.bench();
     benched.forEach(p => bench.appendChild(this.playerChip(p)));
 
-    const benchMissing = CONFIG.SQUAD.BENCH - benched.length;
-    for(let i=0;i<benchMissing;i++){
-      const nextPos = this.nextNeededPosition();
-      bench.appendChild(slotEl(nextPos || 'ADD', ()=>this.openAddPlayer(nextPos)));
+    if(!past){
+      const benchMissing = CONFIG.SQUAD.BENCH - benched.length;
+      for(let i=0;i<benchMissing;i++){
+        const nextPos = this.nextNeededPosition();
+        bench.appendChild(slotEl(nextPos || 'ADD', ()=>this.openAddPlayer(nextPos)));
+      }
     }
   },
 
@@ -176,6 +191,12 @@ const Performance = {
        • drop onto another shirt = Store.swapLineup(...)
   ------------------------------------------------- */
   makeInteractive(chip, p){
+    /* past GWs are locked — no drag-drop, tap opens modal directly */
+    if(this.isPastGW()){
+      chip.onclick = () => this.openPlayer(p);
+      return;
+    }
+
     chip.style.touchAction = 'none';
     const THRESH = 8;
     let sx = 0, sy = 0, dragging = false, ghost = null, target = null;
@@ -256,10 +277,20 @@ const Performance = {
   renderStars(){
     const row = document.getElementById('starsRow');
 
-    if(Store.squad.length < 3 || !Store.squad.some(p=>p.history?.length)){
+    /* pool of players eligible for the "star" tiles for this view:
+       past GW → the 15 who were in the squad that week (snapshot);
+       current / season → today's active squad */
+    const eligible = this.isPastGW()
+      ? Store.squadForGW(Store.viewGW)
+      : Store.activeSquad();
+    if(eligible.length < 3 || !eligible.some(p=>p.history?.length)){
       row.innerHTML = '';
       return;
     }
+    const startedThisView = new Set(
+      (this.isPastGW() ? Store.startersForGW(Store.viewGW) : Store.starters())
+        .map(p=>p.id)
+    );
 
     const val = p => Store.seasonMode ? Store.seasonTotal(p) : (Store.pointsIn(p, Store.viewGW) ?? 0);
     const ratio = p => {
@@ -268,12 +299,12 @@ const Performance = {
     };
     const valueRatio = p => ratio(p) / Math.max(0.1, p.price / 6);
 
-    const pool = Store.squad.filter(p=>p.history?.length);
+    const pool = eligible.filter(p=>p.history?.length);
     if(!pool.length){ row.innerHTML=''; return; }
 
     const top  = [...pool].sort((a,b)=>val(b)-val(a))[0];
     const out  = [...pool].filter(p=>p!==top).sort((a,b)=>valueRatio(b)-valueRatio(a))[0] || top;
-    const dis  = [...pool].filter(p=>p.start).sort((a,b)=>ratio(a)-ratio(b))[0] || pool[0];
+    const dis  = [...pool].filter(p=>startedThisView.has(p.id)).sort((a,b)=>ratio(a)-ratio(b))[0] || pool[0];
     const scope = Store.seasonMode ? 'season' : `GW${Store.viewGW}`;
 
     row.innerHTML = `
@@ -301,14 +332,22 @@ const Performance = {
     const el = document.getElementById('heroStats');
     if(!el) return;
 
-    if(!Store.squad.length){ el.innerHTML = ''; return; }
+    if(!Store.activeSquad().length){ el.innerHTML = ''; return; }
 
+    /* season totals sum across every player who's ever been in the
+       squad (retired transfers included) so the number matches what
+       the app actually scored for you */
     const seasonPts = Store.squad.reduce((a,p)=>a + Store.seasonTotal(p), 0);
-    const value     = Store.squad.reduce((a,p)=>a + (p.price||0), 0);
+    const value     = Store.activeSquad().reduce((a,p)=>a + (p.price||0), 0);
     const weeks     = this.playedWeeks().length;
 
+    /* GW points come from the STARTERS OF THAT GW — past weeks read
+       the frozen snapshot so numbers don't shift when you transfer today */
+    const gwStarters = this.isPastGW()
+      ? Store.startersForGW(Store.viewGW)
+      : Store.starters();
     const effCapId = Store.effectiveCaptain(Store.viewGW).player?.id;
-    const gwPts    = Store.starters().reduce((a,p)=>{
+    const gwPts    = gwStarters.reduce((a,p)=>{
       const pts = Store.pointsIn(p, Store.viewGW) ?? 0;
       return a + pts * (p.id === effCapId ? 2 : 1);
     }, 0);
@@ -397,7 +436,7 @@ const Performance = {
 
     const sb = searchBox({
       pos: targetPos,
-      exclude: Store.squad.map(p=>p.id),
+      exclude: Store.activeSquad().map(p=>p.id),
       onPick: player => {
         const res = Store.addPlayer(player);
         if(!res.ok){ alert(res.reason); return; }
@@ -450,9 +489,17 @@ const Performance = {
       ? `<span class="m-grade" style="--grade:var(--lime);margin-left:6px">Captain ×2${eff.fallback?' · via vice':''}</span>`
       : '';
 
+    const past = this.isPastGW();
+
+    /* on the current GW `p.start` reflects reality; on a past GW we
+       ask the snapshot whether he started that week */
+    const startedThisGW = past
+      ? Store.startersForGW(Store.viewGW).some(x => x.id === p.id)
+      : p.start;
+
     Modal.open(`
       <h3>${p.name}</h3>
-      <div class="m-meta">${p.team} · ${p.pos} · £${p.price.toFixed(1)}m · GW${Store.viewGW}</div>
+      <div class="m-meta">${p.team} · ${p.pos} · £${p.price.toFixed(1)}m · GW${Store.viewGW}${past ? ' · <span class="vtag">locked</span>' : ''}</div>
       ${g.grade ? `<span class="m-grade" style="--grade:var(--${g.grade})">${CONFIG.GRADE_WORD[g.grade]}</span>${capTag}` : capTag}
 
       ${spark ? `<div class="m-sec"><h4>Season form — last ${p.history.length} weeks</h4>${spark}</div>` : ''}
@@ -467,18 +514,26 @@ const Performance = {
           <button class="m-btn ${isVice?'on':''}" id="btnVice">${isVice?'Vice ✓':'Make vice'}</button>
         </div>
         <div class="hint-line" style="padding:6px 0 0">
-          Sets the armband for GW${armGW} only — other weeks stay as they were.
+          ${past
+            ? `Correct the armband for GW${armGW} only — other weeks stay as they were.`
+            : `Sets the armband for GW${armGW} only — other weeks stay as they were.`}
         </div>
       </div>
 
-      <div class="m-actions">
-        <button class="m-btn" id="btnStart">${p.start?'Move to bench':'Move to XI'}</button>
-      </div>
-      <div class="m-actions">
-        <button class="m-btn warn" id="btnSwap">⇄ Transfer this player</button>
-        <button class="m-btn danger" id="btnRemove">Remove</button>
-      </div>
-      <div class="swap-panel" id="swapPanel"></div>
+      ${past
+        ? `<div class="hint-line" style="padding:14px 4px 0">
+             GW${Store.viewGW}'s squad and XI are locked (deadline has passed).
+             ${startedThisGW ? 'He started that week.' : 'He was on the bench that week.'}
+             Manage your current squad from <b>Draft</b>.
+           </div>`
+        : `<div class="m-actions">
+             <button class="m-btn" id="btnStart">${p.start?'Move to bench':'Move to XI'}</button>
+           </div>
+           <div class="m-actions">
+             <button class="m-btn warn" id="btnSwap">⇄ Transfer this player</button>
+             <button class="m-btn danger" id="btnRemove">Remove</button>
+           </div>
+           <div class="swap-panel" id="swapPanel"></div>`}
     `, `var(--${g.grade||'lime'})`);
 
     this.wireModalActions(p, armGW);
@@ -635,7 +690,7 @@ const Performance = {
 
     const sb = searchBox({
       pos: p.pos,
-      exclude: Store.squad.map(x=>x.id),
+      exclude: Store.activeSquad().map(x=>x.id),
       placeholder: `Replace ${p.name} with…`,
       onPick: player => {
         const res = Store.transfer(p.id, player, Store.viewGW);
@@ -669,7 +724,9 @@ const Performance = {
     const rows = weeks.map(gw=>{
       const eff  = Store.effectiveCaptain(gw);
       const capP = eff.player;
-      const best = Store.squad
+      /* "best in squad" that GW is picked from the roster that was
+         in the squad THAT WEEK, not today's roster */
+      const best = Store.squadForGW(gw)
         .map(p=>({ p, pts: Store.pointsIn(p, gw) ?? 0 }))
         .sort((a,b)=>b.pts-a.pts)[0];
       const capPts = capP ? (Store.pointsIn(capP, gw) ?? 0) : 0;
@@ -703,10 +760,12 @@ const Performance = {
     }
 
     const rows = weeks.map(gw=>{
-      const benchBest = Store.bench()
+      /* the bench-vs-starter comparison uses the snapshot for that GW,
+         so past weeks stay frozen when you make changes today */
+      const benchBest = Store.benchForGW(gw)
         .map(p=>({ p, pts: Store.pointsIn(p, gw) ?? 0 }))
         .sort((a,b)=>b.pts-a.pts)[0];
-      const startWorst = Store.starters().filter(p=>p.pos!=='GK')
+      const startWorst = Store.startersForGW(gw).filter(p=>p.pos!=='GK')
         .map(p=>({ p, pts: Store.pointsIn(p, gw) ?? 0 }))
         .sort((a,b)=>a.pts-b.pts)[0];
       if(!benchBest || !startWorst) return '';

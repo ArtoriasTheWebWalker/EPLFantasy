@@ -39,6 +39,8 @@ export const CONFIG = {
     cands     : 'fpl2627_candidates',
     caps      : 'fpl2627_captains',        // { [gw]: playerId } — per-GW captain
     vices     : 'fpl2627_vices',           // { [gw]: playerId } — per-GW vice
+    lineups   : 'fpl2627_lineups',         // { [gw]: { memberIds, starterIds } }
+    lastGW    : 'fpl2627_last_known_gw',   // number — last currentGW we saw
     bootstrap : 'fpl2627_bootstrap_cache',
     settings  : 'fpl2627_settings'
   },

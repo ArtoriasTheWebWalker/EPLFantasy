@@ -210,7 +210,7 @@ const Draft = {
 
     const sb = searchBox({
       pos: targetPos,
-      exclude: Store.squad.map(p=>p.id),
+      exclude: Store.activeSquad().map(p=>p.id),
       onPick: player => {
         const res = Store.addPlayer(player);
         if(!res.ok){ alert(res.reason); return; }
@@ -343,7 +343,7 @@ const Draft = {
 
     const sb = searchBox({
       pos: p.pos,
-      exclude: Store.squad.map(x=>x.id),
+      exclude: Store.activeSquad().map(x=>x.id),
       placeholder: `Replace ${p.name} with…`,
       onPick: player => {
         const res = Store.transfer(p.id, player, Store.currentGW);
@@ -465,7 +465,7 @@ const Draft = {
   openAddCandidate(pos){
     const sb = searchBox({
       pos,
-      exclude: [...Store.squad.map(p=>p.id), ...Object.keys(Store.candidates).map(Number)],
+      exclude: [...Store.activeSquad().map(p=>p.id), ...Object.keys(Store.candidates).map(Number)],
       placeholder: `Add a ${CONFIG.POS_LABEL[pos].replace(/s$/,'').toLowerCase()} to watch…`,
       note: `Anyone you add here sits on your shortlist with his season form and fixture run — he is not in your squad until you transfer him in on the pitch above.`,
       onPick: player => {

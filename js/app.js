@@ -112,6 +112,13 @@ async function boot(){
        known, then drop the flags. Idempotent after the first run. */
     Store.migrateLegacyCaptains();
 
+    /* Any past gameweek whose deadline passed while the app was
+       closed gets its lineup snapshot back-filled from the working
+       state — the closest thing we have to what you had on that
+       deadline day. Idempotent: past GWs already carrying a snapshot
+       are never overwritten. */
+    Store.seedMissedLineups();
+
     const fx = await API.fixtures();
     if(fx){
       Store.fixtures = fx;

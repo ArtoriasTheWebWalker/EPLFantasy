@@ -38,14 +38,22 @@ function emit(what){
 const SquadShape = `
   {
     id, name, team, teamId, pos, price,
-    start:  true|false,     // in the XI or on the bench
+    start:  true|false,     // in the XI or on the bench (current view only)
     inGW:   null|number,    // gameweek he joined the squad
+    outGW:  null|number,    // gameweek he left (was transferred out); null = still here
     history: [ { gw, points, ... } ]   // filled from the API
   }
 
   Captain and vice are NOT stored on the player — they live in
-  Store.captains[gw] / Store.vices[gw] so each gameweek keeps its
-  own armband decision.`;
+  Store.captains[gw] / Store.vices[gw].
+
+  Store.squad keeps EVERY player who has ever been in the squad, so
+  past-gameweek renders can still resolve names/kits for players who
+  were later transferred out. "Current squad" = filter outGW == null.
+
+  Store.lineups[gw] snapshots WHO was in the XI / bench for that GW:
+  { memberIds:[15], starterIds:[11] }. Written on every mutation to
+  lineups[currentGW]; past GWs are frozen (never overwritten).`;
 
 export const Store = {
 
@@ -58,6 +66,12 @@ export const Store = {
   /* per-GW armband — { [gw]: playerId } */
   captains  : load(CONFIG.STORE.caps,  {}),
   vices     : load(CONFIG.STORE.vices, {}),
+
+  /* per-GW lineup snapshots — { [gw]: { memberIds, starterIds } } */
+  lineups   : load(CONFIG.STORE.lineups, {}),
+
+  /* highest currentGW we've ever seen; used to detect deadline crossings */
+  lastKnownGW: load(CONFIG.STORE.lastGW, 0),
 
   /* runtime only, not persisted */
   pool      : [],     // all FPL players, from API.bootstrap()
@@ -72,11 +86,18 @@ export const Store = {
 
   /* =================================================
      SQUAD
+
+     "activeSquad" = players still in the current squad
+     (outGW == null). The raw `squad` list also keeps
+     transferred-out players around, tagged with outGW,
+     so past-gameweek renders can look them up by id.
   ================================================= */
 
-  countPos(pos){ return this.squad.filter(p=>p.pos===pos).length; },
+  activeSquad(){ return this.squad.filter(p => p.outGW == null); },
 
-  countStart(pos){ return this.squad.filter(p=>p.pos===pos && p.start).length; },
+  countPos(pos){ return this.activeSquad().filter(p=>p.pos===pos).length; },
+
+  countStart(pos){ return this.activeSquad().filter(p=>p.pos===pos && p.start).length; },
 
   /* Minimum starters per position for a legal FPL formation. */
   MIN_START: { GK:1, DEF:3, MID:2, FWD:1 },
@@ -89,7 +110,7 @@ export const Store = {
 
     if(this.countStart(pos) < this.MIN_START[pos]) return true;
 
-    const outfieldStarters = this.squad.filter(p=>p.pos!=='GK' && p.start).length;
+    const outfieldStarters = this.activeSquad().filter(p=>p.pos!=='GK' && p.start).length;
     const outfieldPlaces   = CONFIG.SQUAD.STARTERS - CONFIG.SQUAD.START_GK;   // 10
     if(outfieldStarters >= outfieldPlaces) return false;
 
@@ -110,7 +131,7 @@ export const Store = {
       if(have < min) out.push(`needs at least ${min} ${CONFIG.POS_LABEL[pos].toLowerCase()}`);
     }
     const n = this.starters().length;
-    if(n !== CONFIG.SQUAD.STARTERS && this.squad.length === CONFIG.SQUAD.TOTAL)
+    if(n !== CONFIG.SQUAD.STARTERS && this.activeSquad().length === CONFIG.SQUAD.TOTAL)
       out.push(`has ${n} starters, should be ${CONFIG.SQUAD.STARTERS}`);
     return out;
   },
@@ -118,12 +139,12 @@ export const Store = {
   /* how many of this position may still be added */
   spaceFor(pos){ return CONFIG.SQUAD[pos] - this.countPos(pos); },
 
-  isFull(){ return this.squad.length >= CONFIG.SQUAD.TOTAL; },
+  isFull(){ return this.activeSquad().length >= CONFIG.SQUAD.TOTAL; },
 
-  has(id){ return this.squad.some(p=>p.id===id); },
+  has(id){ return this.activeSquad().some(p=>p.id===id); },
 
   /* total squad value, £m */
-  squadValue(){ return this.squad.reduce((a,p)=>a + (p.price||0), 0); },
+  squadValue(){ return this.activeSquad().reduce((a,p)=>a + (p.price||0), 0); },
 
   /* Add a player to a position slot.
      Enforces the FPL quota: 2 GK, 5 DEF, 5 MID, 3 FWD. */
@@ -150,45 +171,79 @@ export const Store = {
       price: poolPlayer.price,
       start: startFlag,
       inGW: null,
+      outGW: null,
       history: []
     });
     this.persistSquad();
     return { ok:true };
   },
 
+  /* Was this player ever recorded in a past lineup snapshot? If so
+     we can't hard-delete him — past GWs need to render him — we mark
+     outGW instead. If he never made it into any snapshot he's fresh
+     roster clutter and we drop him entirely. */
+  _isInAnySnapshot(id){
+    for(const gw of Object.keys(this.lineups)){
+      const ln = this.lineups[gw];
+      if(ln?.memberIds?.includes(id)) return true;
+    }
+    return false;
+  },
+
   removePlayer(id){
-    this.squad = this.squad.filter(p=>p.id!==id);
+    const p = this.squad.find(x=>x.id===id);
+    if(!p) return;
+
+    if(this._isInAnySnapshot(id)){
+      /* mark as gone from the current squad, preserve for past renders */
+      p.outGW = this.currentGW;
+      p.start = false;
+    }else{
+      /* never locked into a past lineup — safe to drop */
+      this.squad = this.squad.filter(x=>x.id!==id);
+    }
+
     delete this.draft[id];
-    /* also wipe any GW where he still holds the armband */
-    for(const gw of Object.keys(this.captains)) if(this.captains[gw] === id) delete this.captains[gw];
-    for(const gw of Object.keys(this.vices))    if(this.vices[gw]    === id) delete this.vices[gw];
+    /* also wipe any FUTURE armband slot he still holds — past GW
+       snapshots keep him as they were */
+    const cw = this.currentGW;
+    if(this.captains[cw] === id) delete this.captains[cw];
+    if(this.vices[cw]    === id) delete this.vices[cw];
     this.persistSquad();
     this.persistDraft();
     this.persistCaps();
   },
 
-  /* Transfer: out goes, in arrives, same position enforced. */
+  /* Transfer: outgoing player is retained with outGW = currentGW so
+     past-GW views still resolve him. Incoming player joins with
+     inGW = currentGW. Same-position enforced. */
   transfer(outId, poolPlayer, gw){
-    const idx = this.squad.findIndex(p=>p.id===outId);
-    if(idx === -1) return { ok:false, reason:'Player not in squad' };
-    const out = this.squad[idx];
+    const out = this.activeSquad().find(p=>p.id===outId);
+    if(!out) return { ok:false, reason:'Player not in squad' };
     if(out.pos !== poolPlayer.pos)
       return { ok:false, reason:`FPL only allows same-position transfers (${out.pos} for ${out.pos})` };
     if(this.has(poolPlayer.id)) return { ok:false, reason:'Already in your squad' };
 
-    this.squad[idx] = {
+    const tGW = gw ?? this.currentGW;
+    out.outGW = tGW;
+    /* clear his start flag so the incoming player inherits the slot */
+    const wasStarting = out.start;
+    out.start = false;
+
+    this.squad.push({
       id: poolPlayer.id,
       name: poolPlayer.name,
       team: poolPlayer.team,
       teamId: poolPlayer.teamId,
       pos: poolPlayer.pos,
       price: poolPlayer.price,
-      start: out.start,
-      inGW: gw ?? this.currentGW,
+      start: wasStarting,
+      inGW: tGW,
+      outGW: null,
       history: []
-    };
-    /* if the outgoing player was carrying the armband this GW, drop it —
-       the user will pick a new captain deliberately */
+    });
+
+    /* if the outgoing player was carrying the current armband, drop it */
     const cw = this.currentGW;
     if(this.captains[cw] === outId) delete this.captains[cw];
     if(this.vices[cw]    === outId) delete this.vices[cw];
@@ -261,7 +316,7 @@ export const Store = {
   },
 
   toggleStart(id){
-    const p = this.squad.find(x=>x.id===id);
+    const p = this.activeSquad().find(x=>x.id===id);
     if(!p) return { ok:false };
 
     if(p.start){
@@ -278,11 +333,11 @@ export const Store = {
       /* starting him */
       if(p.pos === 'GK'){
         /* keepers simply swap — the other one drops to the bench */
-        const currentGK = this.squad.find(x=>x.pos==='GK' && x.start);
+        const currentGK = this.activeSquad().find(x=>x.pos==='GK' && x.start);
         if(currentGK) currentGK.start = false;
         p.start = true;
       }else{
-        const outfieldStarters = this.squad.filter(x=>x.pos!=='GK' && x.start).length;
+        const outfieldStarters = this.activeSquad().filter(x=>x.pos!=='GK' && x.start).length;
         if(outfieldStarters >= CONFIG.SQUAD.STARTERS - CONFIG.SQUAD.START_GK)
           return { ok:false, reason:'You already have 10 outfield starters. Bench someone first.' };
         p.start = true;
@@ -301,8 +356,8 @@ export const Store = {
   ------------------------------------------------- */
   swapLineup(idA, idB){
     if(idA === idB) return { ok:false };
-    const a = this.squad.find(p=>p.id===idA);
-    const b = this.squad.find(p=>p.id===idB);
+    const a = this.activeSquad().find(p=>p.id===idA);
+    const b = this.activeSquad().find(p=>p.id===idB);
     if(!a || !b) return { ok:false, reason:'Player not found' };
 
     /* both on the same side → just reorder for tidiness */
@@ -349,16 +404,105 @@ export const Store = {
 
   /* current formation, e.g. "4-4-2" */
   formation(){
-    const d = this.squad.filter(p=>p.pos==='DEF' && p.start).length;
-    const m = this.squad.filter(p=>p.pos==='MID' && p.start).length;
-    const f = this.squad.filter(p=>p.pos==='FWD' && p.start).length;
+    const a = this.activeSquad();
+    const d = a.filter(p=>p.pos==='DEF' && p.start).length;
+    const m = a.filter(p=>p.pos==='MID' && p.start).length;
+    const f = a.filter(p=>p.pos==='FWD' && p.start).length;
     return `${d}-${m}-${f}`;
   },
 
-  starters(){ return this.squad.filter(p=>p.start); },
-  bench(){ return this.squad.filter(p=>!p.start); },
+  /* current-squad convenience — use these on the Draft page and any
+     view that shows "today's squad". For past gameweeks, use the
+     *ForGW helpers below, which resolve from Store.lineups[gw]. */
+  starters(){ return this.activeSquad().filter(p=>p.start); },
+  bench(){ return this.activeSquad().filter(p=>!p.start); },
 
-  persistSquad(){ save(CONFIG.STORE.squad, this.squad); emit('squad'); },
+  /* =================================================
+     PER-GW LINEUP HELPERS
+
+     Reads: squadForGW / startersForGW / benchForGW return the
+     15-man squad and XI/bench for a specific gameweek. They prefer
+     the snapshot in Store.lineups[gw]; if the GW has never been
+     snapshotted they fall back to reconstructing from inGW / outGW
+     on the raw squad list (best-effort for pre-fix history).
+
+     Writes: snapshotLineup(gw) captures the current active squad
+     and XI into lineups[gw]. Called from persistSquad(), so every
+     mutation to the working state re-snaps the CURRENT gw. Past GWs
+     are never overwritten unless snapshotLineup is called with that
+     GW explicitly (used only by the boot-time backfill).
+  ================================================= */
+
+  playerById(id){ return this.squad.find(p=>p.id===id) || null; },
+
+  squadForGW(gw){
+    const snap = this.lineups[gw];
+    if(snap && Array.isArray(snap.memberIds) && snap.memberIds.length){
+      return snap.memberIds.map(id => this.playerById(id)).filter(Boolean);
+    }
+    /* fallback: reconstruct from inGW / outGW windows */
+    return this.squad.filter(p =>
+      (p.inGW  == null || p.inGW  <= gw) &&
+      (p.outGW == null || p.outGW >  gw)
+    );
+  },
+
+  startersForGW(gw){
+    const snap = this.lineups[gw];
+    if(snap && Array.isArray(snap.starterIds) && snap.starterIds.length){
+      return snap.starterIds.map(id => this.playerById(id)).filter(Boolean);
+    }
+    /* fallback: active members of this GW who currently start */
+    return this.squadForGW(gw).filter(p => p.start);
+  },
+
+  benchForGW(gw){
+    const starters = new Set(this.startersForGW(gw).map(p=>p.id));
+    return this.squadForGW(gw).filter(p => !starters.has(p.id));
+  },
+
+  /* Freeze the working state as the snapshot for a given GW.
+     Called on every mutation for currentGW, so lineups[currentGW]
+     always mirrors "today's squad" — the moment currentGW advances,
+     that snapshot IS the frozen record for the week that just ended. */
+  snapshotLineup(gw){
+    const active = this.activeSquad();
+    this.lineups[gw] = {
+      memberIds : active.map(p => p.id),
+      starterIds: active.filter(p => p.start).map(p => p.id)
+    };
+  },
+
+  persistLineups(){
+    save(CONFIG.STORE.lineups, this.lineups);
+    save(CONFIG.STORE.lastGW,  this.lastKnownGW);
+  },
+
+  /* Called from app.js after the API reports the real currentGW.
+     If the deadline for one or more past GWs passed while we were
+     closed, back-fill their snapshots from the current working state
+     (best guess — the state you saw last time you had the app open
+     is the closest thing we have to what you had at each deadline).
+     Past GWs already carrying a snapshot are never overwritten. */
+  seedMissedLineups(){
+    if(this.currentGW > this.lastKnownGW){
+      const from = Math.max(1, this.lastKnownGW || 1);
+      for(let gw = from; gw <= this.currentGW; gw++){
+        if(!this.lineups[gw]) this.snapshotLineup(gw);
+      }
+    }
+    this.lastKnownGW = Math.max(this.lastKnownGW, this.currentGW);
+    this.persistLineups();
+  },
+
+  persistSquad(){
+    /* keep lineups[currentGW] in sync with the working state so it's
+       ready to become the frozen record when the deadline passes */
+    this.snapshotLineup(this.currentGW);
+    save(CONFIG.STORE.squad, this.squad);
+    this.persistLineups();
+    emit('squad');
+  },
 
   /* =================================================
      DRAFT — flags and notes on your own players
@@ -429,26 +573,32 @@ export const Store = {
 
   exportState(){
     return {
-      squad:      this.squad,
-      draft:      this.draft,
-      candidates: this.candidates,
-      captains:   this.captains,
-      vices:      this.vices,
+      squad:       this.squad,
+      draft:       this.draft,
+      candidates:  this.candidates,
+      captains:    this.captains,
+      vices:       this.vices,
+      lineups:     this.lineups,
+      lastKnownGW: this.lastKnownGW,
     };
   },
 
   importState(s){
     if(!s || typeof s !== 'object') return;
-    this.squad      = Array.isArray(s.squad) ? s.squad : [];
-    this.draft      = (s.draft && typeof s.draft === 'object') ? s.draft : {};
-    this.candidates = (s.candidates && typeof s.candidates === 'object') ? s.candidates : {};
-    this.captains   = (s.captains   && typeof s.captains   === 'object') ? s.captains : {};
-    this.vices      = (s.vices      && typeof s.vices      === 'object') ? s.vices    : {};
-    save(CONFIG.STORE.squad, this.squad);
-    save(CONFIG.STORE.draft, this.draft);
-    save(CONFIG.STORE.cands, this.candidates);
-    save(CONFIG.STORE.caps,  this.captains);
-    save(CONFIG.STORE.vices, this.vices);
+    this.squad       = Array.isArray(s.squad) ? s.squad : [];
+    this.draft       = (s.draft       && typeof s.draft       === 'object') ? s.draft       : {};
+    this.candidates  = (s.candidates  && typeof s.candidates  === 'object') ? s.candidates  : {};
+    this.captains    = (s.captains    && typeof s.captains    === 'object') ? s.captains    : {};
+    this.vices       = (s.vices       && typeof s.vices       === 'object') ? s.vices       : {};
+    this.lineups     = (s.lineups     && typeof s.lineups     === 'object') ? s.lineups     : {};
+    this.lastKnownGW = Number.isFinite(s.lastKnownGW) ? s.lastKnownGW : this.lastKnownGW;
+    save(CONFIG.STORE.squad,   this.squad);
+    save(CONFIG.STORE.draft,   this.draft);
+    save(CONFIG.STORE.cands,   this.candidates);
+    save(CONFIG.STORE.caps,    this.captains);
+    save(CONFIG.STORE.vices,   this.vices);
+    save(CONFIG.STORE.lineups, this.lineups);
+    save(CONFIG.STORE.lastGW,  this.lastKnownGW);
     emit('sync');
   },
 
@@ -570,9 +720,11 @@ export const Store = {
 
   resetAll(){
     [CONFIG.STORE.squad, CONFIG.STORE.draft, CONFIG.STORE.cands,
-     CONFIG.STORE.caps,  CONFIG.STORE.vices].forEach(k=>localStorage.removeItem(k));
+     CONFIG.STORE.caps,  CONFIG.STORE.vices, CONFIG.STORE.lineups,
+     CONFIG.STORE.lastGW].forEach(k=>localStorage.removeItem(k));
     this.squad = []; this.draft = {}; this.candidates = {};
     this.captains = {}; this.vices = {};
+    this.lineups = {}; this.lastKnownGW = 0;
     emit('reset');
   }
 };
