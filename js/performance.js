@@ -581,19 +581,10 @@ const Performance = {
           <button class="m-btn ${isCap?'on':'primary'}" id="btnCap">${isCap?'Captain ✓':'Make captain'}</button>
           <button class="m-btn ${isVice?'on':''}" id="btnVice">${isVice?'Vice ✓':'Make vice'}</button>
         </div>
-        <div class="hint-line" style="padding:6px 0 0">
-          ${past
-            ? `Correct the armband for GW${armGW} only — other weeks stay as they were.`
-            : `Sets the armband for GW${armGW} only — other weeks stay as they were.`}
-        </div>
       </div>
 
       ${locked
-        ? `<div class="hint-line" style="padding:14px 4px 0">
-             GW${Store.viewGW}'s squad and XI are locked (deadline has passed).
-             ${startedThisGW ? 'He started that week.' : 'He was on the bench that week.'}
-             Manage your current squad from <b>Draft</b>.
-           </div>`
+        ? ''
         : `<div class="m-actions">
              <button class="m-btn" id="btnStart">${startedThisGW ? `Move to bench for GW${Store.viewGW}` : `Move to XI for GW${Store.viewGW}`}</button>
            </div>
@@ -601,7 +592,6 @@ const Performance = {
              <button class="m-btn warn" id="btnSwap">⇄ ${backfill ? `Swap for GW${Store.viewGW}` : 'Transfer this player'}</button>
              <button class="m-btn danger" id="btnRemove">${backfill ? `Remove from GW${Store.viewGW}` : 'Remove'}</button>
            </div>
-           ${backfill ? `<div class="hint-line" style="padding:6px 0 0">Only this gameweek's snapshot changes — today's squad stays as it is.</div>` : ''}
            <div class="swap-panel" id="swapPanel"></div>`}
     `, `var(--${g.grade||'lime'})`);
 

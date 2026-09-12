@@ -84,7 +84,6 @@ function initSync(){
 
 async function boot(){
   document.getElementById('brandSeason').textContent = CONFIG.SEASON;
-  document.getElementById('footSeason').textContent  = CONFIG.SEASON;
 
   initTabs();
   initModal();

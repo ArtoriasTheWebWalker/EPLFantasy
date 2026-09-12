@@ -258,9 +258,6 @@ const Draft = {
           <button class="m-btn ${isCap?'on':'primary'}" id="btnCap">${isCap?'Captain ✓':'Make captain'}</button>
           <button class="m-btn ${isVice?'on':''}" id="btnVice">${isVice?'Vice ✓':'Make vice'}</button>
         </div>
-        <div class="hint-line" style="padding:6px 0 0">
-          Set once per gameweek — earlier weeks stay as they were.
-        </div>
       </div>
 
       <div class="m-sec">
@@ -467,7 +464,6 @@ const Draft = {
       pos,
       exclude: [...Store.activeSquad().map(p=>p.id), ...Object.keys(Store.candidates).map(Number)],
       placeholder: `Add a ${CONFIG.POS_LABEL[pos].replace(/s$/,'').toLowerCase()} to watch…`,
-      note: `Anyone you add here sits on your shortlist with his season form and fixture run — he is not in your squad until you transfer him in on the pitch above.`,
       onPick: player => {
         const res = Store.addCandidate(player);
         if(!res.ok){ alert(res.reason); return; }
@@ -477,7 +473,6 @@ const Draft = {
 
     Modal.open(`
       <h3>Watch a ${CONFIG.POS_LABEL[pos].replace(/s$/,'')}</h3>
-      <div class="m-meta">Shortlist · ${Store.candidatesFor(pos).length} already watching</div>
       ${sb.html}`);
     sb.bind();
   }
