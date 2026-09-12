@@ -211,6 +211,84 @@ export const API = {
     return out;
   },
 
+  /* =================================================
+     LINKED-ACCOUNT ENDPOINTS
+     All read-only. Take a numeric manager id (visible
+     in the URL when a signed-in user views their team
+     on fantasy.premierleague.com).
+  ================================================= */
+
+  /* Manager profile: team name, overall rank, chips used. */
+  async entry(id){
+    try{
+      const raw = await getJSON(CONFIG.ENDPOINTS.entry.replace('{id}', id));
+      return {
+        id           : raw.id,
+        teamName     : raw.name,
+        managerName  : `${raw.player_first_name} ${raw.player_last_name}`.trim(),
+        rank         : raw.summary_overall_rank,
+        gwRank       : raw.summary_event_rank,
+        totalPoints  : raw.summary_overall_points,
+        currentEvent : raw.current_event,
+        chips        : raw.chips || []
+      };
+    }catch(err){ this.lastError = err.message; return null; }
+  },
+
+  /* Per-GW totals and rank (used to fill history if needed). */
+  async entryHistory(id){
+    try{
+      const raw = await getJSON(CONFIG.ENDPOINTS.entryHistory.replace('{id}', id));
+      return {
+        current : raw.current || [],   // [{event, points, total_points, rank, overall_rank, ...}]
+        past    : raw.past    || [],
+        chips   : raw.chips   || []
+      };
+    }catch(err){ this.lastError = err.message; return null; }
+  },
+
+  /* The XI/bench/captain/vice for one gameweek — the real record.
+     Cached per-manager-per-GW so past weeks don't re-fetch. */
+  async entryPicks(id, gw){
+    const cacheKey = `fpl2627_picks_${id}_${gw}`;
+    const cached = readCache(cacheKey);
+    if(cached) return cached;
+    try{
+      const path = CONFIG.ENDPOINTS.entryPicks
+        .replace('{id}', id).replace('{gw}', gw);
+      const raw = await getJSON(path);
+      const out = {
+        gw,
+        activeChip : raw.active_chip,
+        entryHistory: raw.entry_history,
+        picks: (raw.picks || []).map(p => ({
+          element    : p.element,
+          position   : p.position,
+          multiplier : p.multiplier,   // 0 bench, 1 XI, 2 captain, 3 triple-captain chip
+          isCaptain  : !!p.is_captain,
+          isVice     : !!p.is_vice_captain
+        }))
+      };
+      writeCache(cacheKey, out);
+      return out;
+    }catch(err){ this.lastError = err.message; return null; }
+  },
+
+  /* Every transfer this season. */
+  async entryTransfers(id){
+    try{
+      const raw = await getJSON(CONFIG.ENDPOINTS.entryTransfers.replace('{id}', id));
+      return raw.map(t => ({
+        gw       : t.event,
+        inId     : t.element_in,
+        outId    : t.element_out,
+        cost     : t.element_in_cost,
+        sellPrice: t.element_out_cost,
+        time     : t.time
+      }));
+    }catch(err){ this.lastError = err.message; return null; }
+  },
+
   /* -------------------------------------------------
      leagueTable(teams, fixtures) — built from finished
      fixtures, since bootstrap has no table.

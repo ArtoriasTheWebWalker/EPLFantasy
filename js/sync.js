@@ -16,6 +16,7 @@
 ===================================================== */
 
 import { Store } from './store.js';
+import { API }   from './api.js';
 import { Modal } from './ui.js';
 
 const SYNC_BASE = 'https://fpl-sync.abdulelah12012.workers.dev';
@@ -118,16 +119,48 @@ export const Sync = {
   /* ---------- settings modal ---------- */
   openSettings(){
     const code = this.code();
+    const mid  = Store.managerId;
+    const meta = Store.entryMeta;
+
+    const linkedBlock = mid
+      ? `<div class="m-sec">
+           <h4>Linked FPL account</h4>
+           <div class="cap-rate" style="margin:0 0 8px">
+             <b>${(meta?.teamName || 'FPL team').replace(/[<>]/g,'')}</b>
+             ${meta?.managerName ? ` · ${meta.managerName.replace(/[<>]/g,'')}` : ''}
+             · manager #${mid}
+             ${meta?.rank ? ` · rank ${meta.rank.toLocaleString()}` : ''}
+           </div>
+           <div class="m-actions">
+             <button class="m-btn" id="fplResync">Pull from FPL now</button>
+             <button class="m-btn danger" id="fplUnlink">Unlink</button>
+           </div>
+           <div class="hint-line" style="padding:6px 0 0">
+             The official picks endpoint is the source of truth for your squad, XI, captain and vice each week. Your notes, flags and shortlist stay local.
+           </div>
+         </div>`
+      : `<div class="m-sec">
+           <h4>Link your FPL account</h4>
+           <input class="sync-input" id="fplIdInput" type="text" autocomplete="off" spellcheck="false"
+                  inputmode="numeric" placeholder="your FPL manager id (e.g. 1234567)">
+           <div class="hint-line">Open fantasy.premierleague.com, click your team — the id is the number in the URL: <code>/entry/&lt;this number&gt;/</code>. Read-only — nothing you do here changes the official app.</div>
+           <div class="m-actions" style="margin-top:8px">
+             <button class="m-btn primary" id="fplLink">Link &amp; pull</button>
+           </div>
+         </div>`;
+
     Modal.open(`
-      <h3>Sync across devices</h3>
-      <div class="m-meta">Use the same sync code on your phone and PC to share one squad.</div>
+      <h3>Sync</h3>
+      <div class="m-meta">Cross-device sync + linking your official FPL account.</div>
+
+      ${linkedBlock}
 
       <div class="m-sec">
-        <h4>Your sync code</h4>
+        <h4>Cross-device sync code</h4>
         <input class="sync-input" id="syncCodeInput" type="text" autocomplete="off" spellcheck="false"
                placeholder="a long private phrase (12+ characters)"
                value="${code.replace(/"/g,'&quot;')}">
-        <div class="hint-line">Long and unguessable. Anyone with this code can read and change your squad — it's stored only in this browser, never on the server in plain form.</div>
+        <div class="hint-line">Same code on phone and PC = same squad. Long and unguessable. Stored only in this browser.</div>
       </div>
 
       <div class="m-actions">
@@ -145,6 +178,36 @@ export const Sync = {
     const status = document.getElementById('syncStatus');
     const say = t => { if(status) status.textContent = t; };
     setTimeout(()=>input?.focus(), 40);
+
+    /* ---- FPL-link wiring ---- */
+    const link = document.getElementById('fplLink');
+    if(link) link.onclick = async () => {
+      const raw = (document.getElementById('fplIdInput').value || '').trim();
+      const r = Store.linkManager(raw);
+      if(!r.ok){ say(r.reason); return; }
+      say('Pulling from FPL…');
+      try{
+        const res = await Store.syncFromFPL(API);
+        if(!res.ok){ say(res.reason); return; }
+        Modal.close();
+      }catch(e){ say('Sync failed — check the id and your connection.'); }
+    };
+
+    const resync = document.getElementById('fplResync');
+    if(resync) resync.onclick = async () => {
+      say('Pulling from FPL…');
+      try{
+        const res = await Store.syncFromFPL(API);
+        say(res.ok ? 'Pulled ✓' : (res.reason || 'Sync failed'));
+      }catch(e){ say('Sync failed — check your connection.'); }
+    };
+
+    const unlink = document.getElementById('fplUnlink');
+    if(unlink) unlink.onclick = () => {
+      if(!confirm('Unlink your FPL account? Existing squad data stays; future boots stop syncing until you link again.')) return;
+      Store.unlinkManager();
+      Modal.close();
+    };
 
     document.getElementById('syncSave').onclick = async () => {
       const val = (input.value || '').trim();

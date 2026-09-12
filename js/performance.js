@@ -389,9 +389,16 @@ const Performance = {
       ? ['Points / week', weeks ? (seasonPts/weeks).toFixed(1) : '—', 'violet']
       : [`GW${Store.viewGW} points`, gwPts, 'violet'];
 
+    /* if the FPL account is linked, prefer live overall rank in the
+       second slot; Squad value falls off. Otherwise keep Squad value. */
+    const rank = Store.entryMeta?.rank;
+    const second = rank
+      ? ['Overall rank', rank.toLocaleString(), 'cyan']
+      : ['Squad value', '£' + value.toFixed(1) + 'm', 'cyan'];
+
     const tiles = [
       ['Season points', seasonPts, 'lime'],
-      ['Squad value', '£' + value.toFixed(1) + 'm', 'cyan'],
+      second,
       third
     ];
 

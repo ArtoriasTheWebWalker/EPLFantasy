@@ -73,6 +73,13 @@ export const Store = {
   /* highest currentGW we've ever seen; used to detect deadline crossings */
   lastKnownGW: load(CONFIG.STORE.lastGW, 0),
 
+  /* linked FPL account — persisted id + last-known team/rank meta.
+     When set, boot pulls picks/history from the official API and lets
+     them overwrite lineups / captains / vices. Local notes, flags and
+     candidates are never overwritten. */
+  managerId : load(CONFIG.STORE.manager,   null),
+  entryMeta : load(CONFIG.STORE.entryMeta, null),  // { teamName, managerName, rank, ... }
+
   /* one-time backfill exception: gameweeks 1..BACKFILL_UNTIL stay
      editable even after their "deadline" so the pre-fix snapshots
      (which were seeded as best-guesses from the current squad) can
@@ -741,6 +748,8 @@ export const Store = {
       vices:       this.vices,
       lineups:     this.lineups,
       lastKnownGW: this.lastKnownGW,
+      managerId:   this.managerId,
+      entryMeta:   this.entryMeta,
     };
   },
 
@@ -753,13 +762,17 @@ export const Store = {
     this.vices       = (s.vices       && typeof s.vices       === 'object') ? s.vices       : {};
     this.lineups     = (s.lineups     && typeof s.lineups     === 'object') ? s.lineups     : {};
     this.lastKnownGW = Number.isFinite(s.lastKnownGW) ? s.lastKnownGW : this.lastKnownGW;
-    save(CONFIG.STORE.squad,   this.squad);
-    save(CONFIG.STORE.draft,   this.draft);
-    save(CONFIG.STORE.cands,   this.candidates);
-    save(CONFIG.STORE.caps,    this.captains);
-    save(CONFIG.STORE.vices,   this.vices);
-    save(CONFIG.STORE.lineups, this.lineups);
-    save(CONFIG.STORE.lastGW,  this.lastKnownGW);
+    this.managerId   = Number.isFinite(s.managerId) ? s.managerId : this.managerId;
+    this.entryMeta   = (s.entryMeta   && typeof s.entryMeta   === 'object') ? s.entryMeta   : this.entryMeta;
+    save(CONFIG.STORE.squad,     this.squad);
+    save(CONFIG.STORE.draft,     this.draft);
+    save(CONFIG.STORE.cands,     this.candidates);
+    save(CONFIG.STORE.caps,      this.captains);
+    save(CONFIG.STORE.vices,     this.vices);
+    save(CONFIG.STORE.lineups,   this.lineups);
+    save(CONFIG.STORE.lastGW,    this.lastKnownGW);
+    if(this.managerId != null) save(CONFIG.STORE.manager, this.managerId);
+    if(this.entryMeta)         save(CONFIG.STORE.entryMeta, this.entryMeta);
     emit('sync');
   },
 
@@ -876,16 +889,157 @@ export const Store = {
   },
 
   /* =================================================
+     LINKED FPL ACCOUNT
+     One-way sync: the official picks endpoint is the
+     source of truth for squad / XI / captain / vice per
+     GW. Local notes, Hold/Watch/Swap flags and Draft
+     candidates are always preserved.
+  ================================================= */
+
+  linkManager(id){
+    const n = parseInt(id, 10);
+    if(!Number.isFinite(n) || n <= 0) return { ok:false, reason:'Manager id must be a positive number' };
+    this.managerId = n;
+    save(CONFIG.STORE.manager, this.managerId);
+    return { ok:true };
+  },
+
+  unlinkManager(){
+    this.managerId = null;
+    this.entryMeta = null;
+    localStorage.removeItem(CONFIG.STORE.manager);
+    localStorage.removeItem(CONFIG.STORE.entryMeta);
+    emit('sync');
+  },
+
+  /* Pull the official record for every played gameweek. Overwrites:
+       lineups[gw].memberIds / starterIds
+       captains[gw], vices[gw]
+       Store.squad (reconstructed from union of all picks; retired
+         players get outGW so they only appear in past snapshots)
+     Leaves untouched: draft (notes/flags), candidates. */
+  async syncFromFPL(API){
+    if(!this.managerId) return { ok:false, reason:'No FPL account linked' };
+    if(!API || !this.pool.length) return { ok:false, reason:'API bootstrap must run first' };
+
+    const profile = await API.entry(this.managerId);
+    if(!profile) return { ok:false, reason:'Could not fetch that manager — id may be wrong' };
+    this.entryMeta = {
+      teamName    : profile.teamName,
+      managerName : profile.managerName,
+      rank        : profile.rank,
+      totalPoints : profile.totalPoints,
+      chips       : profile.chips,
+      syncedAt    : Date.now()
+    };
+    save(CONFIG.STORE.entryMeta, this.entryMeta);
+
+    /* Pull picks for every GW from 1 to currentGW. Some may 404 if
+       their deadline hasn't passed yet — swallow and continue. */
+    const pickPromises = [];
+    for(let gw = 1; gw <= this.currentGW; gw++){
+      pickPromises.push(API.entryPicks(this.managerId, gw).then(p => ({ gw, p })));
+    }
+    const pickResults = await Promise.all(pickPromises);
+
+    /* Union of every element the manager has ever fielded. */
+    const seen = new Map();  // id → { first: gw, last: gw }
+    for(const { gw, p } of pickResults){
+      if(!p) continue;
+
+      this.lineups[gw] = {
+        memberIds : p.picks.map(x => x.element),
+        starterIds: p.picks.filter(x => x.multiplier > 0).map(x => x.element),
+      };
+      const cap  = p.picks.find(x => x.isCaptain);
+      const vice = p.picks.find(x => x.isVice);
+      if(cap)  this.captains[gw] = cap.element;
+      if(vice) this.vices[gw]    = vice.element;
+
+      for(const pick of p.picks){
+        const rec = seen.get(pick.element) || { first: gw, last: gw };
+        rec.first = Math.min(rec.first, gw);
+        rec.last  = Math.max(rec.last,  gw);
+        seen.set(pick.element, rec);
+      }
+    }
+
+    /* Latest picks decide who's active today. */
+    const latest = pickResults.slice().reverse().find(r => r.p)?.p;
+    const currentIds = new Set((latest?.picks || []).map(x => x.element));
+    const currentStartFlag = id => {
+      const pick = latest?.picks.find(x => x.element === id);
+      return pick ? pick.multiplier > 0 : false;
+    };
+
+    /* Rebuild Store.squad from the union. Keep existing entries so
+       notes/history survive; add missing ones from the pool. */
+    for(const [id, span] of seen.entries()){
+      const pool = this.pool.find(p => p.id === id);
+      if(!pool) continue;
+      let existing = this.squad.find(p => p.id === id);
+      if(!existing){
+        existing = {
+          id, name: pool.name, team: pool.team, teamId: pool.teamId,
+          pos: pool.pos, price: pool.price,
+          start: currentStartFlag(id), inGW: span.first, outGW: null, history: []
+        };
+        this.squad.push(existing);
+      }else{
+        /* refresh mutable pool-derived fields */
+        existing.name = pool.name; existing.team = pool.team;
+        existing.teamId = pool.teamId; existing.price = pool.price;
+        existing.pos = pool.pos;
+        if(existing.inGW == null) existing.inGW = span.first;
+      }
+      if(currentIds.has(id)){
+        existing.outGW = null;
+        existing.start = currentStartFlag(id);
+      }else{
+        /* not in the latest lineup → retired at the GW after his last appearance */
+        if(existing.outGW == null) existing.outGW = span.last + 1;
+        existing.start = false;
+      }
+    }
+    /* Anyone in Store.squad who never appears in any FPL snapshot is
+       stale local data (from before the link) — drop him unless he's
+       held in a manual lineup snapshot we haven't overwritten. */
+    this.squad = this.squad.filter(p => {
+      if(seen.has(p.id)) return true;
+      return Object.values(this.lineups).some(ln => ln?.memberIds?.includes(p.id));
+    });
+
+    save(CONFIG.STORE.squad, this.squad);
+    this.persistLineups();
+    this.persistCaps();
+
+    /* backfill player histories for anyone we don't have — fires in
+       the background; the UI re-renders as each one lands */
+    for(const p of this.squad){
+      if(!p.history?.length){
+        API.playerHistory(p.id).then(h => {
+          if(h){ p.history = h; save(CONFIG.STORE.squad, this.squad); emit('squad'); }
+        });
+      }
+    }
+
+    emit('sync');
+    return { ok:true, meta:this.entryMeta };
+  },
+
+  /* =================================================
      RESET
   ================================================= */
 
   resetAll(){
     [CONFIG.STORE.squad, CONFIG.STORE.draft, CONFIG.STORE.cands,
      CONFIG.STORE.caps,  CONFIG.STORE.vices, CONFIG.STORE.lineups,
-     CONFIG.STORE.lastGW].forEach(k=>localStorage.removeItem(k));
+     CONFIG.STORE.lastGW, CONFIG.STORE.manager, CONFIG.STORE.entryMeta
+    ].forEach(k=>localStorage.removeItem(k));
     this.squad = []; this.draft = {}; this.candidates = {};
     this.captains = {}; this.vices = {};
     this.lineups = {}; this.lastKnownGW = 0;
+    this.managerId = null; this.entryMeta = null;
     emit('reset');
   }
 };

@@ -22,10 +22,14 @@ export const CONFIG = {
   API_BASE : 'https://fpl-proxy-abc.abdulelah12012.workers.dev',
 
   ENDPOINTS: {
-    bootstrap : '/bootstrap-static/',      // all players, teams, current GW
-    fixtures  : '/fixtures/',              // all 380 fixtures
-    playerHist: '/element-summary/{id}/',  // one player's full season history
-    liveGW    : '/event/{gw}/live/'        // every player's points for one GW
+    bootstrap    : '/bootstrap-static/',        // all players, teams, current GW
+    fixtures     : '/fixtures/',                // all 380 fixtures
+    playerHist   : '/element-summary/{id}/',    // one player's full season history
+    liveGW       : '/event/{gw}/live/',         // every player's points for one GW
+    entry        : '/entry/{id}/',              // manager profile (name, rank, chips)
+    entryHistory : '/entry/{id}/history/',      // per-GW totals and rank
+    entryPicks   : '/entry/{id}/event/{gw}/picks/',  // XI/bench/captain for one GW
+    entryTransfers: '/entry/{id}/transfers/'    // every transfer with GW and cost
   },
 
   /* ---------- refresh ---------- */
@@ -41,6 +45,8 @@ export const CONFIG = {
     vices     : 'fpl2627_vices',           // { [gw]: playerId } — per-GW vice
     lineups   : 'fpl2627_lineups',         // { [gw]: { memberIds, starterIds } }
     lastGW    : 'fpl2627_last_known_gw',   // number — last currentGW we saw
+    manager   : 'fpl2627_manager_id',      // linked FPL manager (integer)
+    entryMeta : 'fpl2627_entry_meta',      // { teamName, rank, ... }
     bootstrap : 'fpl2627_bootstrap_cache',
     settings  : 'fpl2627_settings'
   },

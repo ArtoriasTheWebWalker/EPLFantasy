@@ -119,6 +119,14 @@ async function boot(){
        are never overwritten. */
     Store.seedMissedLineups();
 
+    /* If the user linked their FPL account, pull the official record
+       for every played GW. FPL wins for squad / XI / captain / vice;
+       local notes and Draft flags stay untouched. Runs in background
+       so first paint isn't blocked. */
+    if(Store.managerId){
+      Store.syncFromFPL(API).catch(err => console.warn('FPL sync failed:', err));
+    }
+
     const fx = await API.fixtures();
     if(fx){
       Store.fixtures = fx;
