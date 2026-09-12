@@ -73,6 +73,13 @@ export const Store = {
   /* highest currentGW we've ever seen; used to detect deadline crossings */
   lastKnownGW: load(CONFIG.STORE.lastGW, 0),
 
+  /* one-time backfill exception: gameweeks 1..BACKFILL_UNTIL stay
+     editable even after their "deadline" so the pre-fix snapshots
+     (which were seeded as best-guesses from the current squad) can
+     be corrected to match reality. Every GW after this is locked. */
+  BACKFILL_UNTIL: 4,
+  isBackfillGW(gw){ return gw >= 1 && gw <= this.BACKFILL_UNTIL && gw < this.currentGW; },
+
   /* runtime only, not persisted */
   pool      : [],     // all FPL players, from API.bootstrap()
   teams     : [],
@@ -471,6 +478,160 @@ export const Store = {
       memberIds : active.map(p => p.id),
       starterIds: active.filter(p => p.start).map(p => p.id)
     };
+  },
+
+  /* -------------------------------------------------
+     PAST-GW LINEUP EDITS (backfill mode)
+
+     These write only into lineups[gw]; today's active squad is
+     never touched. Used by Performance's past-GW modal when the
+     GW is in the backfill window. Same validation rules as the
+     current-GW mutations, applied against the snapshot's rosters.
+  ------------------------------------------------- */
+
+  _ensureLineup(gw){
+    if(!this.lineups[gw]){
+      this.lineups[gw] = { memberIds:[], starterIds:[] };
+    }else{
+      this.lineups[gw].memberIds  = this.lineups[gw].memberIds  || [];
+      this.lineups[gw].starterIds = this.lineups[gw].starterIds || [];
+    }
+    return this.lineups[gw];
+  },
+
+  _membersOfGW(gw){
+    return this._ensureLineup(gw).memberIds
+      .map(id => this.playerById(id))
+      .filter(Boolean);
+  },
+
+  _startersOfGW(gw){
+    return this._ensureLineup(gw).starterIds
+      .map(id => this.playerById(id))
+      .filter(Boolean);
+  },
+
+  /* Add a pool player to a past GW's squad. If we've never seen him
+     before we create a lightweight player record so his kit/name/etc.
+     render everywhere; inGW is set for provenance but we don't set
+     outGW (adding him elsewhere later is fine). */
+  addPlayerToGW(pool, gw){
+    const ln  = this._ensureLineup(gw);
+    const mem = this._membersOfGW(gw);
+    if(mem.length >= CONFIG.SQUAD.TOTAL) return { ok:false, reason:'This gameweek already has 15 players' };
+    if(this.countPosInMembers(mem, pool.pos) >= CONFIG.SQUAD[pool.pos])
+      return { ok:false, reason:`GW${gw} already has ${CONFIG.SQUAD[pool.pos]} ${CONFIG.POS_LABEL[pool.pos].toLowerCase()}` };
+    if(ln.memberIds.includes(pool.id)) return { ok:false, reason:'Already in this gameweek' };
+
+    if(!this.playerById(pool.id)){
+      /* backfill-only player — mark retired at this GW so he only
+         appears in past snapshots that include him, never in today's
+         active squad. Real transfers set outGW = currentGW; a snapshot
+         cameo sets it the same way. */
+      this.squad.push({
+        id: pool.id, name: pool.name, team: pool.team, teamId: pool.teamId,
+        pos: pool.pos, price: pool.price,
+        start: false, inGW: gw, outGW: gw, history: []
+      });
+      save(CONFIG.STORE.squad, this.squad);
+    }
+
+    ln.memberIds.push(pool.id);
+    this.persistLineups();
+    emit('squad');
+    return { ok:true };
+  },
+
+  countPosInMembers(members, pos){ return members.filter(p => p.pos === pos).length; },
+
+  removePlayerFromGW(id, gw){
+    const ln = this._ensureLineup(gw);
+    ln.memberIds  = ln.memberIds.filter(x => x !== id);
+    ln.starterIds = ln.starterIds.filter(x => x !== id);
+    /* if he still hasn't been captain here, no armband cleanup needed */
+    if(this.captains[gw] === id) delete this.captains[gw];
+    if(this.vices[gw]    === id) delete this.vices[gw];
+    this.persistLineups();
+    this.persistCaps();
+    emit('squad');
+  },
+
+  /* Same-position swap inside a past GW's roster. Outgoing player is
+     removed from memberIds/starterIds (no outGW dance, since we only
+     edit this GW's snapshot); incoming inherits the start flag. */
+  transferInGW(outId, pool, gw){
+    const ln  = this._ensureLineup(gw);
+    if(!ln.memberIds.includes(outId)) return { ok:false, reason:'Player not in this GW squad' };
+    const outP = this.playerById(outId);
+    if(!outP) return { ok:false, reason:'Outgoing player not found' };
+    if(outP.pos !== pool.pos) return { ok:false, reason:`Same-position only (${outP.pos})` };
+    if(ln.memberIds.includes(pool.id)) return { ok:false, reason:'Already in this GW squad' };
+
+    if(!this.playerById(pool.id)){
+      /* backfill-only player — see comment in addPlayerToGW */
+      this.squad.push({
+        id: pool.id, name: pool.name, team: pool.team, teamId: pool.teamId,
+        pos: pool.pos, price: pool.price,
+        start: false, inGW: gw, outGW: gw, history: []
+      });
+      save(CONFIG.STORE.squad, this.squad);
+    }
+
+    const wasStarting = ln.starterIds.includes(outId);
+    ln.memberIds  = ln.memberIds.map(x => x === outId ? pool.id : x);
+    ln.starterIds = ln.starterIds.filter(x => x !== outId);
+    if(wasStarting) ln.starterIds.push(pool.id);
+
+    if(this.captains[gw] === outId) delete this.captains[gw];
+    if(this.vices[gw]    === outId) delete this.vices[gw];
+    this.persistLineups();
+    this.persistCaps();
+    emit('squad');
+    return { ok:true };
+  },
+
+  /* Start or bench a player within a past GW. Same formation rules
+     as the live toggleStart. */
+  startInGW(id, gw){
+    const ln = this._ensureLineup(gw);
+    if(!ln.memberIds.includes(id)) return { ok:false, reason:'Player not in this GW squad' };
+    if(ln.starterIds.includes(id)) return { ok:true };
+    const p = this.playerById(id);
+    if(!p) return { ok:false };
+
+    const starters = this._startersOfGW(gw);
+    if(p.pos === 'GK'){
+      const gk = starters.find(x => x.pos === 'GK');
+      if(gk) ln.starterIds = ln.starterIds.filter(x => x !== gk.id);
+    }else{
+      const outfield = starters.filter(x => x.pos !== 'GK').length;
+      if(outfield >= CONFIG.SQUAD.STARTERS - CONFIG.SQUAD.START_GK)
+        return { ok:false, reason:'Already 10 outfield starters — bench one first' };
+    }
+    ln.starterIds.push(id);
+    this.persistLineups();
+    emit('squad');
+    return { ok:true };
+  },
+
+  benchInGW(id, gw){
+    const ln = this._ensureLineup(gw);
+    if(!ln.starterIds.includes(id)) return { ok:true };
+    const p = this.playerById(id);
+    if(!p) return { ok:false };
+
+    if(p.pos === 'GK')
+      return { ok:false, reason:'You must always start one goalkeeper. Promote the other keeper — that swaps them.' };
+
+    const starters = this._startersOfGW(gw);
+    const samePos = starters.filter(x => x.pos === p.pos).length;
+    if(samePos <= this.MIN_START[p.pos])
+      return { ok:false, reason:`A legal XI needs at least ${this.MIN_START[p.pos]} ${CONFIG.POS_LABEL[p.pos].toLowerCase()}` };
+
+    ln.starterIds = ln.starterIds.filter(x => x !== id);
+    this.persistLineups();
+    emit('squad');
+    return { ok:true };
   },
 
   persistLineups(){

@@ -52,10 +52,16 @@ const Performance = {
     window.addEventListener('resize', settle);
   },
 
-  /* is the viewed gameweek locked (past its deadline)?
-     Past GWs are read-only for squad/XI edits; only the armband
-     stays editable so mis-remembered captains can be corrected. */
+  /* GW state under this view:
+       past      → viewGW < currentGW (any past week)
+       backfill  → past AND still in the one-time backfill window
+                   (GW1..Store.BACKFILL_UNTIL). Fully editable, but
+                   edits target lineups[viewGW] not the working state.
+       locked    → past AND outside the backfill window. Read-only for
+                   squad/XI; armband only. */
   isPastGW(){ return !Store.seasonMode && Store.viewGW < Store.currentGW; },
+  isBackfillGW(){ return this.isPastGW() && Store.isBackfillGW(Store.viewGW); },
+  isLockedGW(){   return this.isPastGW() && !this.isBackfillGW(); },
 
   render(){
     document.getElementById('perfBanner').innerHTML = apiBanner(Store.apiState || 'offline');
@@ -103,11 +109,20 @@ const Performance = {
     pitch.innerHTML = '<div class="goalmouth"></div>';
     bench.innerHTML = '';
 
-    const past = this.isPastGW();
-    const gw   = Store.seasonMode ? Store.currentGW : Store.viewGW;
+    const past     = this.isPastGW();
+    const backfill = this.isBackfillGW();
+    const gw       = Store.seasonMode ? Store.currentGW : Store.viewGW;
 
     const starters = past ? Store.startersForGW(gw) : Store.starters();
     const benched  = past ? Store.benchForGW(gw)    : Store.bench();
+
+    /* how many of `pos` can still be added to THIS view */
+    const spaceForInView = (pos) => {
+      if(!past) return Store.spaceFor(pos);
+      if(!backfill) return 0;
+      const members = Store.squadForGW(gw);
+      return CONFIG.SQUAD[pos] - members.filter(p=>p.pos===pos).length;
+    };
 
     CONFIG.POS_ORDER.forEach(pos=>{
       const row = document.createElement('div');
@@ -116,10 +131,11 @@ const Performance = {
       const inRow = starters.filter(p=>p.pos===pos);
       inRow.forEach(p => row.appendChild(this.playerChip(p)));
 
-      /* empty add-slots are current-GW only — past squads were fixed */
-      if(!past){
+      /* empty add-slots on the pitch: current GW always; past GWs
+         only in the backfill window (locked past GWs stay untouched) */
+      if(!past || backfill){
         const wanted  = Store.MIN_START[pos];
-        const missing = Math.max(0, Math.min(wanted - inRow.length, Store.spaceFor(pos)));
+        const missing = Math.max(0, Math.min(wanted - inRow.length, spaceForInView(pos)));
         for(let i=0;i<missing;i++){
           row.appendChild(slotEl(pos, ()=>this.openAddPlayer(pos)));
         }
@@ -130,13 +146,28 @@ const Performance = {
 
     benched.forEach(p => bench.appendChild(this.playerChip(p)));
 
-    if(!past){
-      const benchMissing = CONFIG.SQUAD.BENCH - benched.length;
-      for(let i=0;i<benchMissing;i++){
-        const nextPos = this.nextNeededPosition();
+    if(!past || backfill){
+      const totalMembers = past
+        ? Store.squadForGW(gw).length
+        : Store.activeSquad().length;
+      const benchMissing = Math.min(
+        CONFIG.SQUAD.BENCH - benched.length,
+        CONFIG.SQUAD.TOTAL - totalMembers
+      );
+      for(let i=0;i<Math.max(0, benchMissing);i++){
+        const nextPos = this.nextNeededPositionInView();
         bench.appendChild(slotEl(nextPos || 'ADD', ()=>this.openAddPlayer(nextPos)));
       }
     }
+  },
+
+  nextNeededPositionInView(){
+    if(!this.isPastGW()) return this.nextNeededPosition();
+    const gw = Store.viewGW;
+    const members = Store.squadForGW(gw);
+    return CONFIG.POS_ORDER.find(pos =>
+      CONFIG.SQUAD[pos] - members.filter(p=>p.pos===pos).length > 0
+    ) || null;
   },
 
   nextNeededPosition(){
@@ -191,7 +222,9 @@ const Performance = {
        • drop onto another shirt = Store.swapLineup(...)
   ------------------------------------------------- */
   makeInteractive(chip, p){
-    /* past GWs are locked — no drag-drop, tap opens modal directly */
+    /* past GWs skip the drag gesture entirely — reordering XI/bench
+       on a past GW is done through the modal buttons so the write
+       clearly targets that GW's snapshot */
     if(this.isPastGW()){
       chip.onclick = () => this.openPlayer(p);
       return;
@@ -424,31 +457,52 @@ const Performance = {
   },
 
   /* =================================================
-     ADD PLAYER
+     ADD PLAYER — routes to current-GW or past-GW (backfill)
+     depending on the view.
   ================================================= */
   openAddPlayer(pos){
-    const targetPos = pos && Store.spaceFor(pos) > 0 ? pos : this.nextNeededPosition();
+    const backfill = this.isBackfillGW();
+    const gw = backfill ? Store.viewGW : Store.currentGW;
+
+    const posCountFn = backfill
+      ? (p) => Store.squadForGW(gw).filter(x=>x.pos===p).length
+      : (p) => Store.countPos(p);
+    const totalFn = backfill
+      ? () => Store.squadForGW(gw).length
+      : () => Store.activeSquad().length;
+
+    const spaceFor = (p) => CONFIG.SQUAD[p] - posCountFn(p);
+    const targetPos = pos && spaceFor(pos) > 0
+      ? pos
+      : CONFIG.POS_ORDER.find(p => spaceFor(p) > 0) || null;
+
     if(!targetPos){
-      Modal.open(`<h3>Squad is full</h3>
+      Modal.open(`<h3>Squad is full for GW${gw}</h3>
         <div class="m-meta">15 players · 2 GK, 5 DEF, 5 MID, 3 FWD</div>`);
       return;
     }
 
+    const excludeIds = backfill
+      ? Store.squadForGW(gw).map(p=>p.id)
+      : Store.activeSquad().map(p=>p.id);
+
     const sb = searchBox({
       pos: targetPos,
-      exclude: Store.activeSquad().map(p=>p.id),
+      exclude: excludeIds,
       onPick: player => {
-        const res = Store.addPlayer(player);
+        const res = backfill
+          ? Store.addPlayerToGW(player, gw)
+          : Store.addPlayer(player);
         if(!res.ok){ alert(res.reason); return; }
-        this.backfill(player.id);
+        if(!backfill) this.backfill(player.id);
         Modal.close();
         this.render();
       }
     });
 
     Modal.open(`
-      <h3>Add a ${CONFIG.POS_LABEL[targetPos].replace(/s$/,'')}</h3>
-      <div class="m-meta">${Store.countPos(targetPos)}/${CONFIG.SQUAD[targetPos]} ${CONFIG.POS_LABEL[targetPos].toLowerCase()} · ${Store.squad.length}/15 total</div>
+      <h3>Add a ${CONFIG.POS_LABEL[targetPos].replace(/s$/,'')}${backfill ? ` — GW${gw}` : ''}</h3>
+      <div class="m-meta">${posCountFn(targetPos)}/${CONFIG.SQUAD[targetPos]} ${CONFIG.POS_LABEL[targetPos].toLowerCase()} · ${totalFn()}/15 total${backfill ? ` (backfilling GW${gw})` : ''}</div>
       ${sb.html}`);
     sb.bind();
   },
@@ -489,7 +543,9 @@ const Performance = {
       ? `<span class="m-grade" style="--grade:var(--lime);margin-left:6px">Captain ×2${eff.fallback?' · via vice':''}</span>`
       : '';
 
-    const past = this.isPastGW();
+    const past     = this.isPastGW();
+    const backfill = this.isBackfillGW();
+    const locked   = past && !backfill;
 
     /* on the current GW `p.start` reflects reality; on a past GW we
        ask the snapshot whether he started that week */
@@ -497,9 +553,14 @@ const Performance = {
       ? Store.startersForGW(Store.viewGW).some(x => x.id === p.id)
       : p.start;
 
+    /* label the header state so the user knows what they can edit */
+    const stateTag = locked   ? ' · <span class="vtag">locked</span>'
+                   : backfill ? ` · <span class="vtag" style="background:var(--amber);color:#000">backfill · GW${Store.viewGW}</span>`
+                   : '';
+
     Modal.open(`
       <h3>${p.name}</h3>
-      <div class="m-meta">${p.team} · ${p.pos} · £${p.price.toFixed(1)}m · GW${Store.viewGW}${past ? ' · <span class="vtag">locked</span>' : ''}</div>
+      <div class="m-meta">${p.team} · ${p.pos} · £${p.price.toFixed(1)}m · GW${Store.viewGW}${stateTag}</div>
       ${g.grade ? `<span class="m-grade" style="--grade:var(--${g.grade})">${CONFIG.GRADE_WORD[g.grade]}</span>${capTag}` : capTag}
 
       ${spark ? `<div class="m-sec"><h4>Season form — last ${p.history.length} weeks</h4>${spark}</div>` : ''}
@@ -520,19 +581,20 @@ const Performance = {
         </div>
       </div>
 
-      ${past
+      ${locked
         ? `<div class="hint-line" style="padding:14px 4px 0">
              GW${Store.viewGW}'s squad and XI are locked (deadline has passed).
              ${startedThisGW ? 'He started that week.' : 'He was on the bench that week.'}
              Manage your current squad from <b>Draft</b>.
            </div>`
         : `<div class="m-actions">
-             <button class="m-btn" id="btnStart">${p.start?'Move to bench':'Move to XI'}</button>
+             <button class="m-btn" id="btnStart">${startedThisGW ? `Move to bench for GW${Store.viewGW}` : `Move to XI for GW${Store.viewGW}`}</button>
            </div>
            <div class="m-actions">
-             <button class="m-btn warn" id="btnSwap">⇄ Transfer this player</button>
-             <button class="m-btn danger" id="btnRemove">Remove</button>
+             <button class="m-btn warn" id="btnSwap">⇄ ${backfill ? `Swap for GW${Store.viewGW}` : 'Transfer this player'}</button>
+             <button class="m-btn danger" id="btnRemove">${backfill ? `Remove from GW${Store.viewGW}` : 'Remove'}</button>
            </div>
+           ${backfill ? `<div class="hint-line" style="padding:6px 0 0">Only this gameweek's snapshot changes — today's squad stays as it is.</div>` : ''}
            <div class="swap-panel" id="swapPanel"></div>`}
     `, `var(--${g.grade||'lime'})`);
 
@@ -661,6 +723,9 @@ const Performance = {
      (the viewed GW in single-GW mode, currentGW in season)
   ------------------------------------------------- */
   wireModalActions(p, armGW){
+    const backfill = this.isBackfillGW();
+    const gw       = Store.viewGW;
+
     const cap = document.getElementById('btnCap');
     if(cap) cap.onclick = () => { Store.setCaptain(p.id, armGW); Modal.close(); this.render(); };
 
@@ -669,15 +734,26 @@ const Performance = {
 
     const st = document.getElementById('btnStart');
     if(st) st.onclick = () => {
-      const r = Store.toggleStart(p.id);
+      let r;
+      if(backfill){
+        const startedThisGW = Store.startersForGW(gw).some(x => x.id === p.id);
+        r = startedThisGW ? Store.benchInGW(p.id, gw) : Store.startInGW(p.id, gw);
+      } else {
+        r = Store.toggleStart(p.id);
+      }
       if(!r.ok){ alert(r.reason); return; }
       Modal.close(); this.render();
     };
 
     const rm = document.getElementById('btnRemove');
     if(rm) rm.onclick = () => {
-      if(!confirm(`Remove ${p.name} from your squad?`)) return;
-      Store.removePlayer(p.id); Modal.close(); this.render();
+      const msg = backfill
+        ? `Remove ${p.name} from your GW${gw} squad? (Today's squad stays as it is.)`
+        : `Remove ${p.name} from your squad?`;
+      if(!confirm(msg)) return;
+      if(backfill) Store.removePlayerFromGW(p.id, gw);
+      else Store.removePlayer(p.id);
+      Modal.close(); this.render();
     };
 
     const sw = document.getElementById('btnSwap');
@@ -688,12 +764,21 @@ const Performance = {
     const panel = document.getElementById('swapPanel');
     if(panel.dataset.open === '1'){ panel.innerHTML=''; panel.dataset.open='0'; return; }
 
+    const backfill = this.isBackfillGW();
+    const gw       = Store.viewGW;
+
+    const excludeIds = backfill
+      ? Store.squadForGW(gw).map(x=>x.id)
+      : Store.activeSquad().map(x=>x.id);
+
     const sb = searchBox({
       pos: p.pos,
-      exclude: Store.activeSquad().map(x=>x.id),
-      placeholder: `Replace ${p.name} with…`,
+      exclude: excludeIds,
+      placeholder: backfill ? `Replace ${p.name} in GW${gw} with…` : `Replace ${p.name} with…`,
       onPick: player => {
-        const res = Store.transfer(p.id, player, Store.viewGW);
+        const res = backfill
+          ? Store.transferInGW(p.id, player, gw)
+          : Store.transfer(p.id, player, Store.viewGW);
         if(!res.ok){ alert(res.reason); return; }
         this.backfill(player.id);
         Modal.close();
