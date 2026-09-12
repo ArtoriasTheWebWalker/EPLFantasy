@@ -39,11 +39,13 @@ const SquadShape = `
   {
     id, name, team, teamId, pos, price,
     start:  true|false,     // in the XI or on the bench
-    cap:    true|false,     // captain
-    vice:   true|false,     // vice-captain (2x if captain plays 0 mins)
     inGW:   null|number,    // gameweek he joined the squad
     history: [ { gw, points, ... } ]   // filled from the API
-  }`;
+  }
+
+  Captain and vice are NOT stored on the player — they live in
+  Store.captains[gw] / Store.vices[gw] so each gameweek keeps its
+  own armband decision.`;
 
 export const Store = {
 
@@ -52,6 +54,10 @@ export const Store = {
   squad     : load(CONFIG.STORE.squad, []),
   draft     : load(CONFIG.STORE.draft, {}),
   candidates: load(CONFIG.STORE.cands, {}),
+
+  /* per-GW armband — { [gw]: playerId } */
+  captains  : load(CONFIG.STORE.caps,  {}),
+  vices     : load(CONFIG.STORE.vices, {}),
 
   /* runtime only, not persisted */
   pool      : [],     // all FPL players, from API.bootstrap()
@@ -143,8 +149,6 @@ export const Store = {
       pos: poolPlayer.pos,
       price: poolPlayer.price,
       start: startFlag,
-      cap: false,
-      vice: false,
       inGW: null,
       history: []
     });
@@ -155,8 +159,12 @@ export const Store = {
   removePlayer(id){
     this.squad = this.squad.filter(p=>p.id!==id);
     delete this.draft[id];
+    /* also wipe any GW where he still holds the armband */
+    for(const gw of Object.keys(this.captains)) if(this.captains[gw] === id) delete this.captains[gw];
+    for(const gw of Object.keys(this.vices))    if(this.vices[gw]    === id) delete this.vices[gw];
     this.persistSquad();
     this.persistDraft();
+    this.persistCaps();
   },
 
   /* Transfer: out goes, in arrives, same position enforced. */
@@ -176,31 +184,80 @@ export const Store = {
       pos: poolPlayer.pos,
       price: poolPlayer.price,
       start: out.start,
-      cap: false,
-      vice: out.vice,
       inGW: gw ?? this.currentGW,
       history: []
     };
+    /* if the outgoing player was carrying the armband this GW, drop it —
+       the user will pick a new captain deliberately */
+    const cw = this.currentGW;
+    if(this.captains[cw] === outId) delete this.captains[cw];
+    if(this.vices[cw]    === outId) delete this.vices[cw];
     delete this.draft[outId];
     this.persistSquad();
     this.persistDraft();
+    this.persistCaps();
     return { ok:true, out };
   },
 
-  setCaptain(id){
-    this.squad.forEach(p=>{
-      p.cap = (p.id===id);
-      if(p.id===id) p.vice = false;   // captain can't also be vice
-    });
-    this.persistSquad();
+  /* =================================================
+     CAPTAIN / VICE — per gameweek
+     One armband decision per GW, so past weeks stay
+     frozen when you change captain later. Default GW
+     is Store.currentGW.
+  ================================================= */
+
+  captainIdOf(gw){ return this.captains[gw] ?? null; },
+  viceIdOf   (gw){ return this.vices[gw]    ?? null; },
+
+  captainOf(gw){
+    const id = this.captainIdOf(gw);
+    return id ? this.squad.find(p=>p.id===id) || null : null;
+  },
+  viceOf(gw){
+    const id = this.viceIdOf(gw);
+    return id ? this.squad.find(p=>p.id===id) || null : null;
   },
 
-  setVice(id){
-    this.squad.forEach(p=>{
-      p.vice = (p.id===id);
-      if(p.id===id) p.cap = false;    // vice can't also be captain
-    });
+  setCaptain(id, gw){
+    const target = gw ?? this.currentGW;
+    this.captains[target] = id;
+    if(this.vices[target] === id) delete this.vices[target];   // can't be both
+    this.persistCaps();
+  },
+
+  setVice(id, gw){
+    const target = gw ?? this.currentGW;
+    this.vices[target] = id;
+    if(this.captains[target] === id) delete this.captains[target];
+    this.persistCaps();
+  },
+
+  /* One-time migration for squads that still carry the old p.cap / p.vice
+     flags. Seed those into the per-GW maps for every played week plus the
+     current one, then drop the flags. Runs cheap-and-often; the guard makes
+     it a no-op once the maps exist. */
+  migrateLegacyCaptains(){
+    const seeded = Object.keys(this.captains).length + Object.keys(this.vices).length > 0;
+    if(seeded) return;
+    const legacyCap  = this.squad.find(p=>p.cap);
+    const legacyVice = this.squad.find(p=>p.vice);
+    if(!legacyCap && !legacyVice) return;
+
+    const gws = new Set([this.currentGW]);
+    this.squad.forEach(p => (p.history||[]).forEach(h => gws.add(h.gw)));
+    for(const gw of gws){
+      if(legacyCap)  this.captains[gw] = legacyCap.id;
+      if(legacyVice) this.vices[gw]    = legacyVice.id;
+    }
+    this.squad.forEach(p => { delete p.cap; delete p.vice; });
     this.persistSquad();
+    this.persistCaps();
+  },
+
+  persistCaps(){
+    save(CONFIG.STORE.caps,  this.captains);
+    save(CONFIG.STORE.vices, this.vices);
+    emit('captains');
   },
 
   toggleStart(id){
@@ -375,6 +432,8 @@ export const Store = {
       squad:      this.squad,
       draft:      this.draft,
       candidates: this.candidates,
+      captains:   this.captains,
+      vices:      this.vices,
     };
   },
 
@@ -383,9 +442,13 @@ export const Store = {
     this.squad      = Array.isArray(s.squad) ? s.squad : [];
     this.draft      = (s.draft && typeof s.draft === 'object') ? s.draft : {};
     this.candidates = (s.candidates && typeof s.candidates === 'object') ? s.candidates : {};
+    this.captains   = (s.captains   && typeof s.captains   === 'object') ? s.captains : {};
+    this.vices      = (s.vices      && typeof s.vices      === 'object') ? s.vices    : {};
     save(CONFIG.STORE.squad, this.squad);
     save(CONFIG.STORE.draft, this.draft);
     save(CONFIG.STORE.cands, this.candidates);
+    save(CONFIG.STORE.caps,  this.captains);
+    save(CONFIG.STORE.vices, this.vices);
     emit('sync');
   },
 
@@ -417,8 +480,8 @@ export const Store = {
   /* who actually gets the 2x for a gameweek.
      If the captain played 0 minutes that week, the vice takes over. */
   effectiveCaptain(gw){
-    const cap  = this.squad.find(p=>p.cap);
-    const vice = this.squad.find(p=>p.vice);
+    const cap  = this.captainOf(gw);
+    const vice = this.viceOf(gw);
     if(!cap) return { player:null, fallback:false };
     const capMin = this.minutesIn(cap, gw);
     if(vice && capMin === 0) return { player:vice, fallback:true };
@@ -506,8 +569,10 @@ export const Store = {
   ================================================= */
 
   resetAll(){
-    [CONFIG.STORE.squad, CONFIG.STORE.draft, CONFIG.STORE.cands].forEach(k=>localStorage.removeItem(k));
+    [CONFIG.STORE.squad, CONFIG.STORE.draft, CONFIG.STORE.cands,
+     CONFIG.STORE.caps,  CONFIG.STORE.vices].forEach(k=>localStorage.removeItem(k));
     this.squad = []; this.draft = {}; this.candidates = {};
+    this.captains = {}; this.vices = {};
     emit('reset');
   }
 };

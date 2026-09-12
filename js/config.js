@@ -37,6 +37,8 @@ export const CONFIG = {
     squad     : 'fpl2627_squad',
     draft     : 'fpl2627_draft',
     cands     : 'fpl2627_candidates',
+    caps      : 'fpl2627_captains',        // { [gw]: playerId } — per-GW captain
+    vices     : 'fpl2627_vices',           // { [gw]: playerId } — per-GW vice
     bootstrap : 'fpl2627_bootstrap_cache',
     settings  : 'fpl2627_settings'
   },

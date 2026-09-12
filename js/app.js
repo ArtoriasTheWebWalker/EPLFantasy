@@ -107,6 +107,11 @@ async function boot(){
     Store.currentGW = boot.currentGW;
     Store.viewGW    = boot.currentGW;
 
+    /* Legacy squads carry cap/vice flags on the player. Now that the
+       armband is per-GW, seed those into the maps once the real GW is
+       known, then drop the flags. Idempotent after the first run. */
+    Store.migrateLegacyCaptains();
+
     const fx = await API.fixtures();
     if(fx){
       Store.fixtures = fx;

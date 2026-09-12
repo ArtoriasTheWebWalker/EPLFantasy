@@ -1,8 +1,15 @@
 /* =====================================================
-   PERFORMANCE PAGE
+   PERFORMANCE PAGE — EDITABLE (backfill mode)
 
-   Shows the squad as it actually performed. Everything
-   here reads from Store; nothing is stored locally.
+   Shows the squad as it actually performed, and lets you
+   edit players / captain / vice for the CURRENTLY VIEWED
+   gameweek. This is deliberately editable right now so
+   past-GW captains can be backfilled after the per-GW
+   captain fix — pick a past GW pill, tap a player, hit
+   "Make captain" and it stores against that GW alone.
+
+   Every editing action here also happens on Draft; Draft
+   remains the primary planning surface for future weeks.
 ===================================================== */
 
 import { CONFIG } from './config.js';
@@ -16,14 +23,10 @@ const GRADE_HEX = { blue:'#4FB8FF', green:'#4BE58A', amber:'#FFC43D', red:'#FF5A
 
 const Performance = {
 
-  /* -------------------------------------------------
-     mount — runs once, wires listeners
-  ------------------------------------------------- */
   mount(){
     const nav   = document.querySelector('#page-performance .slide-nav');
     const snavs = document.querySelectorAll('#page-performance .snav');
 
-    /* move the gliding indicator pill onto a button */
     const move = (btn, instant) => {
       if(!btn || !nav) return;
       if(instant) nav.classList.add('no-anim');
@@ -44,15 +47,11 @@ const Performance = {
       };
     });
 
-    /* snap the indicator under the active tab, and keep it aligned on resize */
     const settle = () => move(document.querySelector('#page-performance .snav.active') || snavs[0], true);
     settle();
     window.addEventListener('resize', settle);
   },
 
-  /* -------------------------------------------------
-     render — called on load and on any store change
-  ------------------------------------------------- */
   render(){
     document.getElementById('perfBanner').innerHTML = apiBanner(Store.apiState || 'offline');
     this.renderHero();
@@ -89,7 +88,7 @@ const Performance = {
   },
 
   /* -------------------------------------------------
-     the pitch — formation follows the actual XI
+     the pitch — editable via chip taps and drag-drop
   ------------------------------------------------- */
   renderPitch(){
     const pitch = document.getElementById('pitchArea');
@@ -99,7 +98,6 @@ const Performance = {
 
     const starters = Store.starters();
 
-    /* one row per position, in order */
     CONFIG.POS_ORDER.forEach(pos=>{
       const row = document.createElement('div');
       row.className = 'p-row' + (pos==='GK' ? ' gk' : '');
@@ -107,9 +105,6 @@ const Performance = {
       const inRow = starters.filter(p=>p.pos===pos);
       inRow.forEach(p => row.appendChild(this.playerChip(p)));
 
-      /* Empty slots so you can add players straight from the pitch.
-         We draw down to the legal minimum for each position; extra
-         places fill themselves as you add more players. */
       const wanted  = Store.MIN_START[pos];
       const missing = Math.max(0, Math.min(wanted - inRow.length, Store.spaceFor(pos)));
       for(let i=0;i<missing;i++){
@@ -119,7 +114,6 @@ const Performance = {
       if(row.children.length) pitch.appendChild(row);
     });
 
-    /* bench */
     const benched = Store.bench();
     benched.forEach(p => bench.appendChild(this.playerChip(p)));
 
@@ -134,20 +128,41 @@ const Performance = {
     return CONFIG.POS_ORDER.find(pos => Store.spaceFor(pos) > 0) || null;
   },
 
-  /* one chip, graded for the current view.
-     Tap opens the breakdown; drag swaps XI <-> bench (see makeInteractive). */
+  /* one chip. Captain / vice come from the map keyed on the viewed GW
+     (or currentGW in season mode). The effective captain of the viewed
+     GW gets his points doubled with a ×2 badge on the stripe. */
   playerChip(p){
     const g = Store.seasonMode ? Store.gradeSeason(p) : Store.gradeGW(p, Store.viewGW);
     const pts = g.pts;
 
+    const gwForBadge = Store.seasonMode ? Store.currentGW : Store.viewGW;
+    const capId  = Store.captainIdOf(gwForBadge);
+    const viceId = Store.viceIdOf(gwForBadge);
+    const isCap  = capId  != null && p.id === capId;
+    const isVice = viceId != null && p.id === viceId;
+
+    let doubledPts = null;
+    if(!Store.seasonMode && pts !== null){
+      const eff = Store.effectiveCaptain(Store.viewGW).player;
+      if(eff && eff.id === p.id) doubledPts = pts * 2;
+    }
+
+    const stripeText = pts === null
+      ? '—'
+      : (doubledPts !== null
+          ? `${doubledPts} <small>PTS · ×2</small>`
+          : `${pts} <small>PTS</small>`);
+
     const chip = chipEl(p, {
       grade  : g.grade,
       showCap: true,
-      stripe : { text: pts === null ? '—' : `${pts} <small>PTS</small>` },
+      cap    : isCap,
+      vice   : isVice,
+      stripe : { text: stripeText },
       meta   : Store.seasonMode
                  ? `${p.team} · season`
                  : `${p.team} · £${p.price.toFixed(1)}m`
-      /* no onClick here — makeInteractive tells a tap from a drag */
+      /* no onClick — makeInteractive tells a tap from a drag */
     });
 
     this.makeInteractive(chip, p);
@@ -156,12 +171,12 @@ const Performance = {
 
   /* -------------------------------------------------
      drag-and-drop (desktop + mobile via Pointer Events)
-       • a short press that doesn't move = a tap = open modal
-       • a press that moves past the threshold = a drag
+       • short press that doesn't move = tap = open modal
+       • press that moves past the threshold = drag
        • drop onto another shirt = Store.swapLineup(...)
   ------------------------------------------------- */
   makeInteractive(chip, p){
-    chip.style.touchAction = 'none';   // let us own the gesture on touch
+    chip.style.touchAction = 'none';
     const THRESH = 8;
     let sx = 0, sy = 0, dragging = false, ghost = null, target = null;
 
@@ -195,15 +210,12 @@ const Performance = {
       chip.removeEventListener('pointercancel', onUp);
 
       if(!dragging){
-        /* Touch devices fire a synthetic click ~300ms after release. It
-           hit-tests at the release point, and by then the modal we're
-           opening sits under the finger — so the ghost click lands on a
-           modal button (often Remove). Swallow that one stray click. */
+        /* swallow the touch-synthetic click that would land on the modal */
         const swallow = ev => { ev.stopPropagation(); ev.preventDefault(); };
         document.addEventListener('click', swallow, { capture: true, once: true });
         setTimeout(() => document.removeEventListener('click', swallow, true), 500);
         this.openPlayer(p);
-        return;                                       // it was a tap
+        return;
       }
 
       chip.classList.remove('dragging');
@@ -220,7 +232,7 @@ const Performance = {
     };
 
     chip.addEventListener('pointerdown', e => {
-      if(e.pointerType === 'mouse' && e.button !== 0) return;   // left button only
+      if(e.pointerType === 'mouse' && e.button !== 0) return;
       sx = e.clientX; sy = e.clientY; dragging = false; target = null;
       chip.setPointerCapture?.(e.pointerId);
       chip.addEventListener('pointermove', onMove);
@@ -229,7 +241,6 @@ const Performance = {
     });
   },
 
-  /* topmost squad chip under a screen point, ignoring the dragged one */
   chipUnder(x, y, exclude){
     const els = document.elementsFromPoint(x, y);
     for(const el of els){
@@ -283,7 +294,8 @@ const Performance = {
   },
 
   /* -------------------------------------------------
-     hero stat bar — big glowing headline numbers
+     hero stat bar — GW points doubles for the effective
+     captain of the viewed GW (0-min captain → vice).
   ------------------------------------------------- */
   renderHero(){
     const el = document.getElementById('heroStats');
@@ -294,7 +306,12 @@ const Performance = {
     const seasonPts = Store.squad.reduce((a,p)=>a + Store.seasonTotal(p), 0);
     const value     = Store.squad.reduce((a,p)=>a + (p.price||0), 0);
     const weeks     = this.playedWeeks().length;
-    const gwPts     = Store.starters().reduce((a,p)=>a + ((Store.pointsIn(p, Store.viewGW) ?? 0) * (p.cap?2:1)), 0);
+
+    const effCapId = Store.effectiveCaptain(Store.viewGW).player?.id;
+    const gwPts    = Store.starters().reduce((a,p)=>{
+      const pts = Store.pointsIn(p, Store.viewGW) ?? 0;
+      return a + pts * (p.id === effCapId ? 2 : 1);
+    }, 0);
 
     const third = Store.seasonMode
       ? ['Points / week', weeks ? (seasonPts/weeks).toFixed(1) : '—', 'violet']
@@ -343,7 +360,7 @@ const Performance = {
   },
 
   /* -------------------------------------------------
-     squad completeness readout (now carries squad value)
+     squad completeness readout (carries squad value)
   ------------------------------------------------- */
   renderStatus(){
     const el = document.getElementById('squadStatus');
@@ -397,7 +414,6 @@ const Performance = {
     sb.bind();
   },
 
-  /* pull a new player's season history in the background */
   async backfill(id){
     const hist = await API.playerHistory(id);
     if(hist){
@@ -407,8 +423,12 @@ const Performance = {
   },
 
   /* =================================================
-     PLAYER MODAL
+     PLAYER MODAL — breakdown + edit for the VIEWED GW
   ================================================= */
+
+  /* what GW should the armband edits target? */
+  armbandGW(){ return Store.seasonMode ? Store.currentGW : Store.viewGW; },
+
   openPlayer(p){
     Store.seasonMode ? this.seasonModal(p) : this.gwModal(p);
   },
@@ -417,23 +437,40 @@ const Performance = {
     const g = Store.gradeGW(p, Store.viewGW);
     const h = p.history?.find(x=>x.gw===Store.viewGW);
 
+    const armGW = this.armbandGW();
+    const isCap  = Store.captainIdOf(armGW) === p.id;
+    const isVice = Store.viceIdOf(armGW)    === p.id;
+
     const breakdown = h ? this.breakdownRows(h, p.pos) : '';
     const spark = this.sparklineSVG(p.history, GRADE_HEX[g.grade] || GRADE_HEX.lime);
+
+    const eff = Store.effectiveCaptain(Store.viewGW);
+    const isEffCap = eff.player && eff.player.id === p.id;
+    const capTag = isEffCap
+      ? `<span class="m-grade" style="--grade:var(--lime);margin-left:6px">Captain ×2${eff.fallback?' · via vice':''}</span>`
+      : '';
 
     Modal.open(`
       <h3>${p.name}</h3>
       <div class="m-meta">${p.team} · ${p.pos} · £${p.price.toFixed(1)}m · GW${Store.viewGW}</div>
-      ${g.grade ? `<span class="m-grade" style="--grade:var(--${g.grade})">${CONFIG.GRADE_WORD[g.grade]}</span>` : ''}
+      ${g.grade ? `<span class="m-grade" style="--grade:var(--${g.grade})">${CONFIG.GRADE_WORD[g.grade]}</span>${capTag}` : capTag}
 
       ${spark ? `<div class="m-sec"><h4>Season form — last ${p.history.length} weeks</h4>${spark}</div>` : ''}
 
-      ${h ? `<div class="m-sec"><h4>Points breakdown</h4>${breakdown}</div>`
+      ${h ? `<div class="m-sec"><h4>Points breakdown</h4>${breakdown}${isEffCap && h.points!=null ? `<div class="break-row total" style="border-top:none"><span>Captain ×2</span><span>${h.points*2}</span></div>` : ''}</div>`
           : `<div class="hint-line">No data for GW${Store.viewGW} yet.</div>`}
 
-      <div class="m-actions">
-        <button class="m-btn ${p.cap?'on':'primary'}" id="btnCap">${p.cap?'Captain ✓':'Make captain'}</button>
-        <button class="m-btn ${p.vice?'on':''}" id="btnVice">${p.vice?'Vice ✓':'Make vice'}</button>
+      <div class="m-sec">
+        <h4>Armband — GW${armGW}</h4>
+        <div class="m-actions">
+          <button class="m-btn ${isCap?'on':'primary'}" id="btnCap">${isCap?'Captain ✓':'Make captain'}</button>
+          <button class="m-btn ${isVice?'on':''}" id="btnVice">${isVice?'Vice ✓':'Make vice'}</button>
+        </div>
+        <div class="hint-line" style="padding:6px 0 0">
+          Sets the armband for GW${armGW} only — other weeks stay as they were.
+        </div>
       </div>
+
       <div class="m-actions">
         <button class="m-btn" id="btnStart">${p.start?'Move to bench':'Move to XI'}</button>
       </div>
@@ -444,12 +481,16 @@ const Performance = {
       <div class="swap-panel" id="swapPanel"></div>
     `, `var(--${g.grade||'lime'})`);
 
-    this.wireModalActions(p);
+    this.wireModalActions(p, armGW);
   },
 
   seasonModal(p){
     const g = Store.gradeSeason(p);
     const hist = p.history || [];
+
+    const armGW = this.armbandGW();
+    const isCap  = Store.captainIdOf(armGW) === p.id;
+    const isVice = Store.viceIdOf(armGW)    === p.id;
 
     const cells = hist.map(h=>{
       const gg = Store.gradeGW(p, h.gw);
@@ -473,9 +514,16 @@ const Performance = {
         </div>`
       : `<div class="hint-line">No season history yet.</div>`}
 
+      <div class="m-sec">
+        <h4>Armband — GW${armGW}</h4>
+        <div class="m-actions">
+          <button class="m-btn ${isCap?'on':'primary'}" id="btnCap">${isCap?'Captain ✓':'Make captain'}</button>
+          <button class="m-btn ${isVice?'on':''}" id="btnVice">${isVice?'Vice ✓':'Make vice'}</button>
+        </div>
+      </div>
+
       <div class="m-actions">
-        <button class="m-btn ${p.cap?'on':'primary'}" id="btnCap">${p.cap?'Captain ✓':'Make captain'}</button>
-        <button class="m-btn ${p.vice?'on':''}" id="btnVice">${p.vice?'Vice ✓':'Make vice'}</button>
+        <button class="m-btn" id="btnStart">${p.start?'Move to bench':'Move to XI'}</button>
       </div>
       <div class="m-actions">
         <button class="m-btn warn" id="btnSwap">⇄ Transfer this player</button>
@@ -484,7 +532,7 @@ const Performance = {
       <div class="swap-panel" id="swapPanel"></div>
     `, `var(--${g.grade||'lime'})`);
 
-    this.wireModalActions(p);
+    this.wireModalActions(p, armGW);
   },
 
   breakdownRows(h, pos){
@@ -503,9 +551,6 @@ const Performance = {
       + `<div class="break-row total"><span>Total</span><span>${h.points}</span></div>`;
   },
 
-  /* -------------------------------------------------
-     scouting report — accumulated season narrative
-  ------------------------------------------------- */
   scoutingReport(p){
     const hist = p.history || [];
     const out = [];
@@ -514,7 +559,6 @@ const Performance = {
     const pts = hist.map(h=>h.points);
     const n = pts.length;
 
-    /* consistency vs the position average */
     let above = 0, rated = 0;
     hist.forEach(h=>{
       const avg = Store.posAvg?.[h.gw]?.[p.pos];
@@ -526,12 +570,10 @@ const Performance = {
       else if(above <= Math.floor(rated*0.3)) out.push(['▼',`Below the position average in ${rated-above} of ${rated} weeks.`]);
     }
 
-    /* variance */
     const spread = Math.max(...pts) - Math.min(...pts);
     if(spread >= 9) out.push(['~','Streaky — big hauls separated by quiet weeks. Hard to bench, hard to trust.']);
     else if(spread <= 4 && n >= 4) out.push(['=','Low variance — you broadly know what you are getting each week.']);
 
-    /* form trend */
     if(n >= 6){
       const first = pts.slice(0,3).reduce((a,b)=>a+b,0)/3;
       const last  = pts.slice(-3).reduce((a,b)=>a+b,0)/3;
@@ -539,7 +581,6 @@ const Performance = {
       else if(first - last >= 2.5) out.push(['↘','Fading — early-season form has dropped off.']);
     }
 
-    /* opponent quality */
     let hardSum=0, hardN=0, easySum=0, easyN=0;
     hist.forEach(h=>{
       if(h.opponentId == null) return;
@@ -553,7 +594,6 @@ const Performance = {
       else if(eA - hA >= 1.5) out.push(['◇','Feasts on the weaker sides, but goes missing in the tough matches.']);
     }
 
-    /* minutes */
     const started = hist.filter(h=>h.minutes >= 60).length;
     if(started <= Math.floor(n*0.6)) out.push(['◷',`Rotation risk — 60+ minutes in only ${started} of ${n} weeks.`]);
 
@@ -562,14 +602,15 @@ const Performance = {
   },
 
   /* -------------------------------------------------
-     modal buttons
+     modal buttons — captain/vice target the ARMBAND GW
+     (the viewed GW in single-GW mode, currentGW in season)
   ------------------------------------------------- */
-  wireModalActions(p){
+  wireModalActions(p, armGW){
     const cap = document.getElementById('btnCap');
-    if(cap) cap.onclick = () => { Store.setCaptain(p.id); Modal.close(); this.render(); };
+    if(cap) cap.onclick = () => { Store.setCaptain(p.id, armGW); Modal.close(); this.render(); };
 
     const vice = document.getElementById('btnVice');
-    if(vice) vice.onclick = () => { Store.setVice(p.id); Modal.close(); this.render(); };
+    if(vice) vice.onclick = () => { Store.setVice(p.id, armGW); Modal.close(); this.render(); };
 
     const st = document.getElementById('btnStart');
     if(st) st.onclick = () => {
@@ -612,7 +653,6 @@ const Performance = {
 
   /* =================================================
      CAPTAIN / BENCH / TRANSFERS slides
-     These fill in as gameweeks accumulate.
   ================================================= */
 
   renderCaptain(){
@@ -641,7 +681,7 @@ const Performance = {
         <td>${capP ? capP.name : '—'}${eff.fallback ? ' <span class="vtag">via vice</span>' : ''}</td>
         <td class="num">${capPts*2}</td>
         <td>${best ? `${best.p.name} (${best.pts})` : '—'}</td>
-        <td style="color:var(--${right?'lime':'amber'})">${right?'Right call':'Missed'}</td>
+        <td style="color:var(--${right?'lime':'amber'})">${capP ? (right?'Right call':'Missed') : '—'}</td>
       </tr>`;
     }).join('');
 

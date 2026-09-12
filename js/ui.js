@@ -37,15 +37,20 @@ export function shirtHTML(team){
     grade     : 'blue'|'green'|'amber'|'red'|null
     meta      : small line under the name
     onClick   : handler
-    showCap   : draw the captain / vice badges
+    showCap   : draw the captain / vice badges when cap/vice is set
+    cap       : true → this player is captain in the current view
+    vice      : true → this player is vice in the current view
+
+  Captain / vice are passed in because they now depend on which
+  gameweek is being viewed (Store.captains is a per-GW map).
 */
 export function chipEl(player, opts={}){
   const el = document.createElement('button');
   el.className = 'chip' + (opts.grade ? ` g-${opts.grade}` : '');
   el.dataset.pid = player.id;                 // used by drag-and-drop hit testing
   el.innerHTML = `
-    ${opts.showCap && player.cap  ? '<span class="capstar">C</span>'  : ''}
-    ${opts.showCap && player.vice ? '<span class="vicestar">V</span>' : ''}
+    ${opts.showCap && opts.cap  ? '<span class="capstar">C</span>'  : ''}
+    ${opts.showCap && opts.vice ? '<span class="vicestar">V</span>' : ''}
     ${player.inGW ? `<span class="in-tag">IN GW${player.inGW}</span>` : ''}
     ${shirtHTML(player.team)}
     ${opts.stripe ? `<div class="pstripe ${opts.stripe.className||''}">${opts.stripe.text}</div>` : ''}
