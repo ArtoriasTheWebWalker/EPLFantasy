@@ -294,13 +294,16 @@ section{margin-bottom:30px}
 .p-row{display:flex;justify-content:center;gap:9px;flex-wrap:wrap;position:relative;z-index:1}
 .p-row.gk{margin-top:16px}
 
+/* Bench sits flush under the pitch — same rounded corner treatment as
+   the pitch, no gap, so the whole XI + bench reads as one field like
+   the official FPL app. */
 .bench{
-  margin-top:14px;padding:16px 14px;border-radius:18px;
+  margin-top:6px;padding:14px 10px 12px;border-radius:18px;
   background:var(--glass);border:1px solid var(--glass-brd);
   backdrop-filter:var(--blur);box-shadow:var(--shadow), inset 0 1px 0 var(--glass-hi);
 }
-.bench .mini-title{margin-bottom:12px}
-.bench-row{display:flex;gap:9px;flex-wrap:wrap;justify-content:center}
+.bench .mini-title{margin-bottom:10px}
+.bench-row{display:flex;gap:9px;flex-wrap:nowrap;justify-content:center}
 
 /* ---------- player chip ---------- */
 .chip{
@@ -518,13 +521,59 @@ footer{
 }
 
 @media (max-width:640px){
-  .chip,.slot{width:90px}
-  .shirt{width:40px;height:35px}
-  .pstripe{width:58px;font-size:11px}
-  .chip .name{font-size:11px}
-  main{padding:16px 12px 0}
-  .sec-head h2{font-size:19px}
-  .brand-name{font-size:18px}
+  /* --- density pass: fit XI + bench + hero on one phone screen --- */
+  main{padding:10px 8px 0}
+  .brand-name{font-size:17px}
+  header{padding:10px 12px 0}
+  .brand .season{margin-left:6px;padding:3px 7px;font-size:8.5px}
+  .sync-btn{width:30px;height:30px;font-size:14px}
+  .tabs{margin-top:8px;gap:2px}
+  .tab{padding:8px 0 9px;font-size:9px}
+
+  section{margin-bottom:16px}
+  /* the section title on the squad slide is redundant with the SQUAD
+     tab in the slide-nav — hide it on phones to save vertical space */
+  #p-squad > .sec-head{display:none}
+  .sec-head{margin-bottom:8px}
+  .sec-head h2{font-size:16px;gap:5px}
+  .sec-head .tag{font-size:7.5px;padding:3px 7px}
+  .sec-head .hint{display:none}
+
+  .slide-nav{margin-bottom:10px;padding:3px;gap:2px}
+  .snav{padding:8px 0;font-size:9px}
+
+  .api-banner{padding:8px 11px;font-size:9px;margin-bottom:10px;gap:8px}
+  .api-banner .ico{font-size:12px}
+  .gw-row{gap:5px;margin-bottom:6px;padding-bottom:4px}
+  .gw{padding:5px 10px;font-size:9.5px}
+
+  /* chip: 68px wide, tighter padding, smaller shirt+stripe. Matches
+     the official-app density where 4 shirts sit in one row on mobile. */
+  .chip,.slot{width:68px}
+  .chip{padding:5px 4px 5px;border-top-width:2.5px;border-radius:11px}
+  .shirt{width:30px;height:26px;margin:1px auto 1px}
+  .pstripe{width:52px;font-size:10px;padding:1px 0;margin:3px auto 2px;border-radius:5px}
+  .pstripe small{font-size:6px}
+  .chip .name{font-size:10px;margin-bottom:1px;line-height:1.15}
+  .chip .meta{font-size:7px;letter-spacing:.03em}
+  .slot{min-height:74px;padding:4px 3px;font-size:8.5px;border-radius:11px}
+  .slot .plus{font-size:16px;margin-bottom:2px}
+  .capstar,.vicestar{width:15px;height:15px;font-size:8px;top:-5px}
+  .capstar{left:-3px}
+  .vicestar{left:12px}
+  .in-tag{top:-5px;right:-3px;font-size:6.5px;padding:1px 4px}
+
+  /* pitch: fill more of the screen width, less top/bottom padding */
+  .pitch{padding:20px 6px 12px;border-radius:16px;gap:8px}
+  .pitch::before{inset:6px;border-radius:10px}
+  .goalmouth{width:92px;height:26px;top:6px}
+  .p-row{gap:5px}
+  .p-row.gk{margin-top:6px}
+
+  .bench{margin-top:5px;padding:10px 6px 9px;border-radius:14px}
+  .bench .mini-title{margin-bottom:6px;font-size:8.5px}
+  .bench-row{gap:5px}
+  .legend{margin-top:10px;gap:10px;font-size:8.5px}
 }
 
 @media (prefers-reduced-motion:reduce){

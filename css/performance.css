@@ -28,10 +28,11 @@
   text-shadow:0 0 26px color-mix(in srgb,var(--ha,#fff) 55%,transparent);
 }
 @media (max-width:640px){
-  .hero-stats{gap:8px}
-  .hero-tile{padding:13px 12px}
-  .ht-val{font-size:21px}
-  .ht-label{font-size:7.5px;letter-spacing:.1em}
+  .hero-stats{gap:6px;margin:0 0 10px}
+  .hero-tile{padding:8px 9px 9px;border-radius:12px}
+  .hero-tile::after{width:80px;height:80px;right:-30%;top:-60%}
+  .ht-val{font-size:17px;margin-top:4px}
+  .ht-label{font-size:7px;letter-spacing:.08em}
 }
 
 /* ---------- form sparkline ---------- */
@@ -67,7 +68,19 @@
 .star-card.gold{--sc:#FFD34D}
 .star-card.lime{--sc:var(--lime)}
 .star-card.down{--sc:var(--red)}
-@media (max-width:640px){.stars-row{grid-template-columns:1fr}}
+@media (max-width:640px){
+  /* stars collapse to one column and shrink; still visible below the
+     fold so nothing disappears — scroll to see them */
+  .stars-row{grid-template-columns:1fr;gap:6px;margin:10px 0}
+  .star-card{padding:9px 12px;border-radius:12px;gap:9px}
+  .star-card .ic{font-size:18px}
+  .star-card .sc-name{font-size:12.5px;margin-top:2px}
+  .star-card .sc-pts{font-size:9.5px}
+  .star-card .sc-label{font-size:7px;letter-spacing:.1em}
+  .squad-status{margin-top:10px;padding:10px 12px;font-size:9px}
+  .squad-status .quota{gap:5px;margin-top:6px}
+  .squad-status .quota span{padding:2px 7px;font-size:8.5px}
+}
 
 /* ---------- squad status under the pitch ---------- */
 .squad-status{
