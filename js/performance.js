@@ -367,27 +367,19 @@ const Performance = {
 
     if(!Store.activeSquad().length){ el.innerHTML = ''; return; }
 
-    /* season totals sum across every player who's ever been in the
-       squad (retired transfers included) so the number matches what
-       the app actually scored for you */
-    const seasonPts = Store.squad.reduce((a,p)=>a + Store.seasonTotal(p), 0);
+    /* real team score — starters + captain doubling + Bench Boost /
+       Triple Captain effects, minus transfer hits. Prefers the linked
+       account's own totals when available. */
+    const seasonPts = Store.seasonPointsTotal();
     const value     = Store.activeSquad().reduce((a,p)=>a + (p.price||0), 0);
     const weeks     = this.playedWeeks().length;
+    const gwPts     = Store.gwPointsFor(Store.viewGW);
+    const chipLabel = Store.CHIP_SHORT[Store.chipOf(Store.viewGW)] || null;
 
-    /* GW points come from the STARTERS OF THAT GW — past weeks read
-       the frozen snapshot so numbers don't shift when you transfer today */
-    const gwStarters = this.isPastGW()
-      ? Store.startersForGW(Store.viewGW)
-      : Store.starters();
-    const effCapId = Store.effectiveCaptain(Store.viewGW).player?.id;
-    const gwPts    = gwStarters.reduce((a,p)=>{
-      const pts = Store.pointsIn(p, Store.viewGW) ?? 0;
-      return a + pts * (p.id === effCapId ? 2 : 1);
-    }, 0);
-
+    const gwLabel = `GW${Store.viewGW} points${chipLabel ? ` · ${chipLabel}` : ''}`;
     const third = Store.seasonMode
       ? ['Points / week', weeks ? (seasonPts/weeks).toFixed(1) : '—', 'violet']
-      : [`GW${Store.viewGW} points`, gwPts, 'violet'];
+      : [gwLabel, gwPts, 'violet'];
 
     /* if the FPL account is linked, prefer live overall rank in the
        second slot; Squad value falls off. Otherwise keep Squad value. */
@@ -583,6 +575,18 @@ const Performance = {
         </div>
       </div>
 
+      ${!locked ? `
+        <div class="m-sec">
+          <h4>Chip — GW${armGW}</h4>
+          <select class="sync-input" id="chipSel">
+            <option value=""         ${!Store.chipOf(armGW) ? 'selected' : ''}>None</option>
+            <option value="3xc"      ${Store.chipOf(armGW)==='3xc'      ? 'selected' : ''}>Triple Captain (×3)</option>
+            <option value="bboost"   ${Store.chipOf(armGW)==='bboost'   ? 'selected' : ''}>Bench Boost (bench counts)</option>
+            <option value="wildcard" ${Store.chipOf(armGW)==='wildcard' ? 'selected' : ''}>Wildcard</option>
+            <option value="freehit"  ${Store.chipOf(armGW)==='freehit'  ? 'selected' : ''}>Free Hit</option>
+          </select>
+        </div>` : ''}
+
       ${locked
         ? ''
         : `<div class="m-actions">
@@ -728,6 +732,9 @@ const Performance = {
 
     const vice = document.getElementById('btnVice');
     if(vice) vice.onclick = () => { Store.setVice(p.id, armGW); Modal.close(); this.render(); };
+
+    const chipSel = document.getElementById('chipSel');
+    if(chipSel) chipSel.onchange = () => { Store.setChip(armGW, chipSel.value); this.render(); };
 
     const st = document.getElementById('btnStart');
     if(st) st.onclick = () => {

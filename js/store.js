@@ -80,6 +80,25 @@ export const Store = {
   managerId : load(CONFIG.STORE.manager,   null),
   entryMeta : load(CONFIG.STORE.entryMeta, null),  // { teamName, managerName, rank, ... }
 
+  /* which chip (if any) was active in each GW. Codes match the FPL
+     API: '3xc' = Triple Captain, 'bboost' = Bench Boost,
+     'wildcard' = Wildcard, 'freehit' = Free Hit. Wildcard/Free Hit
+     don't affect scoring; TC/BB do. */
+  chips     : load(CONFIG.STORE.chips,     {}),
+
+  /* per-GW official totals + transfer costs, populated by syncFromFPL.
+     When present, the hero prefers these as they're the exact numbers
+     from the official app. { [gw]: {points, totalPoints, transferCost} } */
+  gwHistory : load(CONFIG.STORE.gwHistory, {}),
+
+  CHIP_LABEL: {
+    '3xc':      'Triple Captain',
+    'bboost':   'Bench Boost',
+    'wildcard': 'Wildcard',
+    'freehit':  'Free Hit'
+  },
+  CHIP_SHORT: { '3xc':'TC', 'bboost':'BB', 'wildcard':'WC', 'freehit':'FH' },
+
   /* one-time backfill exception: gameweeks 1..BACKFILL_UNTIL stay
      editable even after their "deadline" so the pre-fix snapshots
      (which were seeded as best-guesses from the current squad) can
@@ -327,6 +346,67 @@ export const Store = {
     save(CONFIG.STORE.caps,  this.captains);
     save(CONFIG.STORE.vices, this.vices);
     emit('captains');
+  },
+
+  /* =================================================
+     CHIPS — per gameweek. null = no chip that week.
+  ================================================= */
+  chipOf(gw){ return this.chips[gw] || null; },
+
+  setChip(gw, code){
+    if(!code) delete this.chips[gw];
+    else      this.chips[gw] = code;
+    save(CONFIG.STORE.chips, this.chips);
+    emit('chips');
+  },
+
+  /* =================================================
+     SCORING — the correct team total for one GW.
+     starters + captain doubling (or ×3 with Triple
+     Captain); Bench Boost adds bench points; transfer
+     hits are subtracted when we have them from FPL.
+     If a snapshot for this GW doesn't exist yet we
+     fall back to today's starters/bench so the current
+     GW still reads right before its first mutation.
+  ================================================= */
+  gwPointsFor(gw){
+    /* if linked, FPL's own tally is authoritative */
+    const hist = this.gwHistory[gw];
+    if(hist && Number.isFinite(hist.points)){
+      const cost = Number.isFinite(hist.transferCost) ? hist.transferCost : 0;
+      return hist.points - cost;
+    }
+
+    const starters = this.startersForGW(gw);
+    const eff      = this.effectiveCaptain(gw);
+    const chip     = this.chipOf(gw);
+    const capMult  = chip === '3xc' ? 3 : 2;
+
+    let total = 0;
+    for(const p of starters){
+      const pts = this.pointsIn(p, gw) ?? 0;
+      const mult = (eff.player && p.id === eff.player.id) ? capMult : 1;
+      total += pts * mult;
+    }
+    if(chip === 'bboost'){
+      for(const p of this.benchForGW(gw)){
+        total += this.pointsIn(p, gw) ?? 0;
+      }
+    }
+    return total;
+  },
+
+  seasonPointsTotal(){
+    /* prefer the FPL account total if linked — matches the app exactly */
+    if(this.entryMeta && Number.isFinite(this.entryMeta.totalPoints)){
+      return this.entryMeta.totalPoints;
+    }
+    /* otherwise sum every played GW using the corrected per-GW formula */
+    let total = 0;
+    const played = new Set();
+    this.squad.forEach(p => (p.history||[]).forEach(h => played.add(h.gw)));
+    for(const gw of played) total += this.gwPointsFor(gw);
+    return total;
   },
 
   toggleStart(id){
@@ -750,6 +830,8 @@ export const Store = {
       lastKnownGW: this.lastKnownGW,
       managerId:   this.managerId,
       entryMeta:   this.entryMeta,
+      chips:       this.chips,
+      gwHistory:   this.gwHistory,
     };
   },
 
@@ -764,6 +846,8 @@ export const Store = {
     this.lastKnownGW = Number.isFinite(s.lastKnownGW) ? s.lastKnownGW : this.lastKnownGW;
     this.managerId   = Number.isFinite(s.managerId) ? s.managerId : this.managerId;
     this.entryMeta   = (s.entryMeta   && typeof s.entryMeta   === 'object') ? s.entryMeta   : this.entryMeta;
+    this.chips       = (s.chips       && typeof s.chips       === 'object') ? s.chips       : {};
+    this.gwHistory   = (s.gwHistory   && typeof s.gwHistory   === 'object') ? s.gwHistory   : {};
     save(CONFIG.STORE.squad,     this.squad);
     save(CONFIG.STORE.draft,     this.draft);
     save(CONFIG.STORE.cands,     this.candidates);
@@ -771,6 +855,8 @@ export const Store = {
     save(CONFIG.STORE.vices,     this.vices);
     save(CONFIG.STORE.lineups,   this.lineups);
     save(CONFIG.STORE.lastGW,    this.lastKnownGW);
+    save(CONFIG.STORE.chips,     this.chips);
+    save(CONFIG.STORE.gwHistory, this.gwHistory);
     if(this.managerId != null) save(CONFIG.STORE.manager, this.managerId);
     if(this.entryMeta)         save(CONFIG.STORE.entryMeta, this.entryMeta);
     emit('sync');
@@ -934,13 +1020,17 @@ export const Store = {
     };
     save(CONFIG.STORE.entryMeta, this.entryMeta);
 
-    /* Pull picks for every GW from 1 to currentGW. Some may 404 if
-       their deadline hasn't passed yet — swallow and continue. */
+    /* Pull picks for every GW from 1 to currentGW plus the per-GW
+       totals from entryHistory. Failed picks endpoints (e.g. GW whose
+       deadline hasn't passed) are swallowed. */
     const pickPromises = [];
     for(let gw = 1; gw <= this.currentGW; gw++){
       pickPromises.push(API.entryPicks(this.managerId, gw).then(p => ({ gw, p })));
     }
-    const pickResults = await Promise.all(pickPromises);
+    const [pickResults, historyRaw] = await Promise.all([
+      Promise.all(pickPromises),
+      API.entryHistory(this.managerId)
+    ]);
 
     /* Union of every element the manager has ever fielded. */
     const seen = new Map();  // id → { first: gw, last: gw }
@@ -956,6 +1046,10 @@ export const Store = {
       if(cap)  this.captains[gw] = cap.element;
       if(vice) this.vices[gw]    = vice.element;
 
+      /* chip in effect that GW, if any — 3xc / bboost / wildcard / freehit */
+      if(p.activeChip) this.chips[gw] = p.activeChip;
+      else if(this.chips[gw]) delete this.chips[gw];
+
       for(const pick of p.picks){
         const rec = seen.get(pick.element) || { first: gw, last: gw };
         rec.first = Math.min(rec.first, gw);
@@ -963,6 +1057,23 @@ export const Store = {
         seen.set(pick.element, rec);
       }
     }
+
+    /* per-GW official totals + transfer costs — the authoritative
+       numbers the hero uses in place of our own computation */
+    this.gwHistory = {};
+    for(const h of (historyRaw?.current || [])){
+      this.gwHistory[h.event] = {
+        points        : h.points,
+        totalPoints   : h.total_points,
+        transferCost  : h.event_transfers_cost || 0,
+        transfers     : h.event_transfers || 0,
+        pointsOnBench : h.points_on_bench || 0,
+        rank          : h.rank,
+        overallRank   : h.overall_rank,
+      };
+    }
+    save(CONFIG.STORE.chips,     this.chips);
+    save(CONFIG.STORE.gwHistory, this.gwHistory);
 
     /* Latest picks decide who's active today. */
     const latest = pickResults.slice().reverse().find(r => r.p)?.p;
@@ -1034,12 +1145,14 @@ export const Store = {
   resetAll(){
     [CONFIG.STORE.squad, CONFIG.STORE.draft, CONFIG.STORE.cands,
      CONFIG.STORE.caps,  CONFIG.STORE.vices, CONFIG.STORE.lineups,
-     CONFIG.STORE.lastGW, CONFIG.STORE.manager, CONFIG.STORE.entryMeta
+     CONFIG.STORE.lastGW, CONFIG.STORE.manager, CONFIG.STORE.entryMeta,
+     CONFIG.STORE.chips, CONFIG.STORE.gwHistory
     ].forEach(k=>localStorage.removeItem(k));
     this.squad = []; this.draft = {}; this.candidates = {};
     this.captains = {}; this.vices = {};
     this.lineups = {}; this.lastKnownGW = 0;
     this.managerId = null; this.entryMeta = null;
+    this.chips = {}; this.gwHistory = {};
     emit('reset');
   }
 };

@@ -47,6 +47,8 @@ export const CONFIG = {
     lastGW    : 'fpl2627_last_known_gw',   // number — last currentGW we saw
     manager   : 'fpl2627_manager_id',      // linked FPL manager (integer)
     entryMeta : 'fpl2627_entry_meta',      // { teamName, rank, ... }
+    chips     : 'fpl2627_chips',           // { [gw]: '3xc'|'bboost'|'wildcard'|'freehit' }
+    gwHistory : 'fpl2627_gw_history',      // { [gw]: {points, transferCost, ...} } from FPL entryHistory
     bootstrap : 'fpl2627_bootstrap_cache',
     settings  : 'fpl2627_settings'
   },

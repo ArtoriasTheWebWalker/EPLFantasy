@@ -261,6 +261,17 @@ const Draft = {
       </div>
 
       <div class="m-sec">
+        <h4>Chip — GW${gw}</h4>
+        <select class="sync-input" id="chipSel">
+          <option value=""         ${!Store.chipOf(gw) ? 'selected' : ''}>None</option>
+          <option value="3xc"      ${Store.chipOf(gw)==='3xc'      ? 'selected' : ''}>Triple Captain (×3)</option>
+          <option value="bboost"   ${Store.chipOf(gw)==='bboost'   ? 'selected' : ''}>Bench Boost (bench counts)</option>
+          <option value="wildcard" ${Store.chipOf(gw)==='wildcard' ? 'selected' : ''}>Wildcard</option>
+          <option value="freehit"  ${Store.chipOf(gw)==='freehit'  ? 'selected' : ''}>Free Hit</option>
+        </select>
+      </div>
+
+      <div class="m-sec">
         <h4>Selection</h4>
         <div class="m-actions">
           <button class="m-btn" id="btnStart">${p.start?'Move to bench':'Move to XI'}</button>
@@ -301,6 +312,10 @@ const Draft = {
     document.getElementById('btnVice').onclick = () => {
       Store.setVice(p.id);
       Modal.close();
+      this.render();
+    };
+    document.getElementById('chipSel').onchange = e => {
+      Store.setChip(gw, e.target.value);
       this.render();
     };
     document.getElementById('btnStart').onclick = () => {
