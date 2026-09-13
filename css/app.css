@@ -76,7 +76,8 @@ body{
   color:var(--chalk);
   font-family:var(--font-body);
   -webkit-font-smoothing:antialiased;
-  padding-bottom:48px;
+  /* respect the iPhone home-indicator area at the bottom when standalone */
+  padding-bottom:calc(48px + env(safe-area-inset-bottom));
   min-height:100vh;
   position:relative;
 }
@@ -103,7 +104,9 @@ header{
   background:linear-gradient(180deg,rgba(8,11,24,.82),rgba(8,11,24,.55));
   backdrop-filter:var(--blur);
   border-bottom:1px solid var(--glass-brd);
-  padding:15px 18px 0;
+  /* extra top pad so the notch / status bar in standalone mode
+     never covers the brand row or the sync button */
+  padding:calc(15px + env(safe-area-inset-top)) 18px 0;
   box-shadow:0 8px 30px -18px rgba(0,0,0,.9);
 }
 .brand{
@@ -524,7 +527,7 @@ footer{
   /* --- density pass: fit XI + bench + hero on one phone screen --- */
   main{padding:10px 8px 0}
   .brand-name{font-size:17px}
-  header{padding:10px 12px 0}
+  header{padding:calc(10px + env(safe-area-inset-top)) 12px 0}
   .brand .season{margin-left:6px;padding:3px 7px;font-size:8.5px}
   .sync-btn{width:30px;height:30px;font-size:14px}
   .tabs{margin-top:8px;gap:2px}
