@@ -1001,8 +1001,12 @@ export const Store = {
   /* Pull the official record for every played gameweek. Overwrites:
        lineups[gw].memberIds / starterIds
        captains[gw], vices[gw]
-       Store.squad (reconstructed from union of all picks; retired
-         players get outGW so they only appear in past snapshots)
+       Store.squad's active membership / start flags (reconstructed
+         from the union of all picks; retired players get outGW so
+         they only appear in past snapshots) — but ONLY once FPL has
+         posted picks for the current gameweek itself. Until then the
+         local working squad (today's transfers/XI edits) is left
+         exactly as-is rather than reconciled against a stale GW.
      Leaves untouched: draft (notes/flags), candidates. */
   async syncFromFPL(API){
     if(!this.managerId) return { ok:false, reason:'No FPL account linked' };
@@ -1075,50 +1079,62 @@ export const Store = {
     save(CONFIG.STORE.chips,     this.chips);
     save(CONFIG.STORE.gwHistory, this.gwHistory);
 
-    /* Latest picks decide who's active today. */
-    const latest = pickResults.slice().reverse().find(r => r.p)?.p;
-    const currentIds = new Set((latest?.picks || []).map(x => x.element));
-    const currentStartFlag = id => {
-      const pick = latest?.picks.find(x => x.element === id);
-      return pick ? pick.multiplier > 0 : false;
-    };
+    /* Only the picks fetched for the CURRENT gameweek can decide who's
+       active today. If FPL hasn't posted them yet (deadline hasn't
+       passed), falling back to an older GW's picks would revive a
+       player you've since transferred out locally while his local
+       replacement also survives (he's still sitting in this GW's own
+       lineup snapshot, which never got overwritten) — both end up
+       "active" at once and the XI count goes over 11. So when today's
+       official picks aren't in yet, skip this reconciliation entirely
+       and leave the local working squad exactly as you left it; the
+       next sync that lands on a real deadline will settle it. */
+    const currentPicks = pickResults.find(r => r.gw === this.currentGW)?.p || null;
 
-    /* Rebuild Store.squad from the union. Keep existing entries so
-       notes/history survive; add missing ones from the pool. */
-    for(const [id, span] of seen.entries()){
-      const pool = this.pool.find(p => p.id === id);
-      if(!pool) continue;
-      let existing = this.squad.find(p => p.id === id);
-      if(!existing){
-        existing = {
-          id, name: pool.name, team: pool.team, teamId: pool.teamId,
-          pos: pool.pos, price: pool.price,
-          start: currentStartFlag(id), inGW: span.first, outGW: null, history: []
-        };
-        this.squad.push(existing);
-      }else{
-        /* refresh mutable pool-derived fields */
-        existing.name = pool.name; existing.team = pool.team;
-        existing.teamId = pool.teamId; existing.price = pool.price;
-        existing.pos = pool.pos;
-        if(existing.inGW == null) existing.inGW = span.first;
+    if(currentPicks){
+      const currentIds = new Set(currentPicks.picks.map(x => x.element));
+      const currentStartFlag = id => {
+        const pick = currentPicks.picks.find(x => x.element === id);
+        return pick ? pick.multiplier > 0 : false;
+      };
+
+      /* Rebuild Store.squad from the union. Keep existing entries so
+         notes/history survive; add missing ones from the pool. */
+      for(const [id, span] of seen.entries()){
+        const pool = this.pool.find(p => p.id === id);
+        if(!pool) continue;
+        let existing = this.squad.find(p => p.id === id);
+        if(!existing){
+          existing = {
+            id, name: pool.name, team: pool.team, teamId: pool.teamId,
+            pos: pool.pos, price: pool.price,
+            start: currentStartFlag(id), inGW: span.first, outGW: null, history: []
+          };
+          this.squad.push(existing);
+        }else{
+          /* refresh mutable pool-derived fields */
+          existing.name = pool.name; existing.team = pool.team;
+          existing.teamId = pool.teamId; existing.price = pool.price;
+          existing.pos = pool.pos;
+          if(existing.inGW == null) existing.inGW = span.first;
+        }
+        if(currentIds.has(id)){
+          existing.outGW = null;
+          existing.start = currentStartFlag(id);
+        }else{
+          /* not in today's official lineup → retired at the GW after his last appearance */
+          if(existing.outGW == null) existing.outGW = span.last + 1;
+          existing.start = false;
+        }
       }
-      if(currentIds.has(id)){
-        existing.outGW = null;
-        existing.start = currentStartFlag(id);
-      }else{
-        /* not in the latest lineup → retired at the GW after his last appearance */
-        if(existing.outGW == null) existing.outGW = span.last + 1;
-        existing.start = false;
-      }
+      /* Anyone in Store.squad who never appears in any FPL snapshot is
+         stale local data (from before the link) — drop him unless he's
+         held in a manual lineup snapshot we haven't overwritten. */
+      this.squad = this.squad.filter(p => {
+        if(seen.has(p.id)) return true;
+        return Object.values(this.lineups).some(ln => ln?.memberIds?.includes(p.id));
+      });
     }
-    /* Anyone in Store.squad who never appears in any FPL snapshot is
-       stale local data (from before the link) — drop him unless he's
-       held in a manual lineup snapshot we haven't overwritten. */
-    this.squad = this.squad.filter(p => {
-      if(seen.has(p.id)) return true;
-      return Object.values(this.lineups).some(ln => ln?.memberIds?.includes(p.id));
-    });
 
     save(CONFIG.STORE.squad, this.squad);
     this.persistLineups();
