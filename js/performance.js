@@ -15,7 +15,7 @@
 import { CONFIG } from './config.js';
 import { API }    from './api.js';
 import { Store }  from './store.js';
-import { Modal, chipEl, slotEl, searchBox, apiBanner, emptyNote } from './ui.js';
+import { Modal, chipEl, slotEl, searchBox, apiBanner, emptyNote, chipSelectHTML } from './ui.js';
 
 /* concrete grade colours (kept in sync with css :root) — used where an
    inline SVG needs a real colour value rather than a CSS variable */
@@ -454,7 +454,14 @@ const Performance = {
       ? `<div style="color:var(--amber);margin-top:7px">Your XI ${issues.join(', ')}.</div>`
       : '';
 
-    el.innerHTML = `${head}${warn}<div class="quota">${quota}</div>`;
+    /* squad-level legality (club limit, budget) — always checked, since
+       an over-limit squad can arrive from a sync as well as from editing */
+    const legal = Store.squadIssues();
+    const legalWarn = legal.length
+      ? `<div style="color:var(--amber);margin-top:7px">${legal.join(' · ')}.</div>`
+      : '';
+
+    el.innerHTML = `${head}${warn}${legalWarn}<div class="quota">${quota}</div>`;
   },
 
   /* =================================================
@@ -581,13 +588,7 @@ const Performance = {
       ${!locked ? `
         <div class="m-sec">
           <h4>Chip — GW${armGW}</h4>
-          <select class="sync-input" id="chipSel">
-            <option value=""         ${!Store.chipOf(armGW) ? 'selected' : ''}>None</option>
-            <option value="3xc"      ${Store.chipOf(armGW)==='3xc'      ? 'selected' : ''}>Triple Captain (×3)</option>
-            <option value="bboost"   ${Store.chipOf(armGW)==='bboost'   ? 'selected' : ''}>Bench Boost (bench counts)</option>
-            <option value="wildcard" ${Store.chipOf(armGW)==='wildcard' ? 'selected' : ''}>Wildcard</option>
-            <option value="freehit"  ${Store.chipOf(armGW)==='freehit'  ? 'selected' : ''}>Free Hit</option>
-          </select>
+          ${chipSelectHTML(armGW)}
         </div>` : ''}
 
       ${locked
@@ -663,8 +664,24 @@ const Performance = {
     if(h.assists)     rows.push(['Assists', h.assists]);
     if(h.cleanSheet)  rows.push(['Clean sheet', h.cleanSheet]);
     if(pos==='GK' && h.saves) rows.push(['Saves', h.saves]);
+    if(h.pensSaved)   rows.push(['Penalty saved', h.pensSaved]);
     if(h.conceded)    rows.push(['Goals conceded', h.conceded]);
+
+    /* Defensive contribution — a flat +2 once the position threshold
+       is met, and nothing below it. Show the tally against the bar so
+       a near miss is visible, since it's otherwise invisible points. */
+    const bar = CONFIG.DEFCON[pos];
+    if(bar != null && h.defCon != null){
+      const hit = h.defCon >= bar;
+      rows.push([
+        'Defensive contribution',
+        `${h.defCon} / ${bar}${hit ? ` &rarr; +${CONFIG.DEFCON_POINTS}` : ''}`
+      ]);
+    }
+
     if(h.bonus)       rows.push(['Bonus', h.bonus]);
+    if(h.ownGoals)    rows.push(['Own goal', h.ownGoals]);
+    if(h.pensMissed)  rows.push(['Penalty missed', h.pensMissed]);
     if(h.yellow)      rows.push(['Yellow card', h.yellow]);
     if(h.red)         rows.push(['Red card', h.red]);
 
@@ -737,7 +754,15 @@ const Performance = {
     if(vice) vice.onclick = () => { Store.setVice(p.id, armGW); Modal.close(); this.render(); };
 
     const chipSel = document.getElementById('chipSel');
-    if(chipSel) chipSel.onchange = () => { Store.setChip(armGW, chipSel.value); this.render(); };
+    if(chipSel) chipSel.onchange = () => {
+      const r = Store.setChip(armGW, chipSel.value);
+      if(!r.ok){
+        alert(r.reason);
+        chipSel.value = Store.chipOf(armGW) || '';   // put the select back
+        return;
+      }
+      this.render();
+    };
 
     const st = document.getElementById('btnStart');
     if(st) st.onclick = () => {

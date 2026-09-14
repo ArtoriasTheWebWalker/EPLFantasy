@@ -18,7 +18,7 @@
 import { CONFIG } from './config.js';
 import { API }    from './api.js';
 import { Store }  from './store.js';
-import { Modal, chipEl, slotEl, searchBox, apiBanner, fixtureRunHTML, emptyNote } from './ui.js';
+import { Modal, chipEl, slotEl, searchBox, apiBanner, fixtureRunHTML, emptyNote, chipSelectHTML } from './ui.js';
 
 const FLAGS = [
   { key:'hold',  label:'Hold'  },
@@ -262,13 +262,7 @@ const Draft = {
 
       <div class="m-sec">
         <h4>Chip — GW${gw}</h4>
-        <select class="sync-input" id="chipSel">
-          <option value=""         ${!Store.chipOf(gw) ? 'selected' : ''}>None</option>
-          <option value="3xc"      ${Store.chipOf(gw)==='3xc'      ? 'selected' : ''}>Triple Captain (×3)</option>
-          <option value="bboost"   ${Store.chipOf(gw)==='bboost'   ? 'selected' : ''}>Bench Boost (bench counts)</option>
-          <option value="wildcard" ${Store.chipOf(gw)==='wildcard' ? 'selected' : ''}>Wildcard</option>
-          <option value="freehit"  ${Store.chipOf(gw)==='freehit'  ? 'selected' : ''}>Free Hit</option>
-        </select>
+        ${chipSelectHTML(gw)}
       </div>
 
       <div class="m-sec">
@@ -315,7 +309,12 @@ const Draft = {
       this.render();
     };
     document.getElementById('chipSel').onchange = e => {
-      Store.setChip(gw, e.target.value);
+      const r = Store.setChip(gw, e.target.value);
+      if(!r.ok){
+        alert(r.reason);
+        e.target.value = Store.chipOf(gw) || '';   // put the select back
+        return;
+      }
       this.render();
     };
     document.getElementById('btnStart').onclick = () => {

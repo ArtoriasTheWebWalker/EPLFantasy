@@ -137,6 +137,37 @@ export function searchBox({ pos, exclude=[], placeholder, onPick, note }){
   return { html, bind };
 }
 
+/* ---------- chip picker ----------
+   One of each chip per half of the season, so an option already spent
+   in this half is labelled with the gameweek that used it and disabled.
+   Store.setChip still refuses it if it gets picked anyway.
+----------------------------------- */
+export function chipSelectHTML(gw){
+  const half = Store.chipHalf(gw);
+  const cur  = Store.chipOf(gw);
+
+  const opts = Object.keys(Store.CHIP_SHORT).map(code=>{
+    const playedIn = Store.chipPlayedIn(code, half, gw);
+    const spent    = playedIn != null;
+    return `<option value="${code}" ${cur===code?'selected':''} ${spent?'disabled':''}>`
+         + `${Store.CHIP_LABEL[code]}${CHIP_HINT[code]||''}${spent?` — used GW${playedIn}`:''}`
+         + `</option>`;
+  }).join('');
+
+  return `<select class="sync-input" id="chipSel">
+      <option value="" ${!cur ? 'selected' : ''}>None</option>
+      ${opts}
+    </select>
+    <div class="hint-line">Half ${half} of the season${half===1?` — these expire after GW${CONFIG.CHIP_HALF_END}`:''}.</div>`;
+}
+
+const CHIP_HINT = {
+  '3xc'   : ' (×3)',
+  'bboost': ' (bench counts)',
+  'wildcard': '',
+  'freehit' : ''
+};
+
 /* ---------- small helpers ---------- */
 
 export function fixtureRunHTML(teamId, n=5){

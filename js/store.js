@@ -203,6 +203,57 @@ export const Store = {
     return outfieldStarters + reserved < outfieldPlaces;
   },
 
+  /* =================================================
+     CLUB LIMIT — max 3 players from any one real club.
+     Absolute in FPL: there is no legitimate way to hold
+     four, so this one blocks rather than warns.
+  ================================================= */
+
+  countTeam(teamId, members = null){
+    const list = members || this.activeSquad();
+    return list.filter(p => p.teamId === teamId).length;
+  },
+
+  /* Name of the club, for an error message the user can act on. */
+  teamName(teamId){
+    return this.teamById?.[teamId]?.short || this.teamById?.[teamId]?.name || 'that club';
+  },
+
+  /* Can this player join, given who's already there? `members` lets a
+     past-GW snapshot be checked instead of today's squad; `replacingId`
+     is the outgoing player in a transfer, who frees his own slot. */
+  teamLimitIssue(pool, { members = null, replacingId = null } = {}){
+    let list = members || this.activeSquad();
+    if(replacingId != null) list = list.filter(p => p.id !== replacingId);
+    if(this.countTeam(pool.teamId, list) < CONFIG.SQUAD.TEAM_LIMIT) return null;
+    return `You already have ${CONFIG.SQUAD.TEAM_LIMIT} players from ${this.teamName(pool.teamId)} — FPL allows a maximum of ${CONFIG.SQUAD.TEAM_LIMIT} from one club.`;
+  },
+
+  /* =================================================
+     SQUAD LEGALITY — warnings, not blocks.
+
+     Budget is deliberately a warning: £100.0m is the STARTING
+     budget, and once prices rise a perfectly legal squad is worth
+     more than that. We don't track purchase prices or the bank, so
+     we can flag the overspend but must not refuse it.
+  ================================================= */
+  squadIssues(){
+    const out = [];
+
+    const counts = {};
+    for(const p of this.activeSquad()) counts[p.teamId] = (counts[p.teamId] || 0) + 1;
+    for(const [teamId, n] of Object.entries(counts)){
+      if(n > CONFIG.SQUAD.TEAM_LIMIT)
+        out.push(`${n} players from ${this.teamName(+teamId)} — the limit is ${CONFIG.SQUAD.TEAM_LIMIT}`);
+    }
+
+    const val = this.squadValue();
+    if(this.activeSquad().length === CONFIG.SQUAD.TOTAL && val > CONFIG.SQUAD.BUDGET){
+      out.push(`£${val.toFixed(1)}m is over the £${CONFIG.SQUAD.BUDGET.toFixed(1)}m starting budget (fine if your squad has risen in value)`);
+    }
+    return out;
+  },
+
   /* Is the current XI legal? Used to warn, never to block. */
   formationIssues(){
     const out = [];
@@ -233,6 +284,9 @@ export const Store = {
     if(this.has(poolPlayer.id)) return { ok:false, reason:'Already in your squad' };
     if(this.spaceFor(poolPlayer.pos) <= 0)
       return { ok:false, reason:`You already have ${CONFIG.SQUAD[poolPlayer.pos]} ${CONFIG.POS_LABEL[poolPlayer.pos].toLowerCase()}` };
+
+    const clubIssue = this.teamLimitIssue(poolPlayer);
+    if(clubIssue) return { ok:false, reason:clubIssue };
 
     /* Auto-place him.
        A legal FPL XI is 1 GK, at least 3 DEF, at least 2 MID and
@@ -314,6 +368,10 @@ export const Store = {
     if(out.pos !== poolPlayer.pos)
       return { ok:false, reason:`FPL only allows same-position transfers (${out.pos} for ${out.pos})` };
     if(this.has(poolPlayer.id)) return { ok:false, reason:'Already in your squad' };
+
+    /* the outgoing player frees his own club slot, so exclude him */
+    const clubIssue = this.teamLimitIssue(poolPlayer, { replacingId: outId });
+    if(clubIssue) return { ok:false, reason:clubIssue };
 
     const tGW = gw ?? this.currentGW;
     out.outGW = tGW;
@@ -421,11 +479,45 @@ export const Store = {
   ================================================= */
   chipOf(gw){ return this.chips[gw] || null; },
 
+  /* Which half of the season a gameweek belongs to. You get one of
+     each chip per half, and the first set expires at the GW19
+     deadline rather than carrying over. */
+  chipHalf(gw){ return gw <= CONFIG.CHIP_HALF_END ? 1 : 2; },
+
+  /* Where this chip was already played in the same half, if anywhere.
+     Returns the gameweek number, or null. */
+  chipPlayedIn(code, half, exceptGW = null){
+    for(const [gw, c] of Object.entries(this.chips)){
+      const n = +gw;
+      if(c !== code || n === exceptGW) continue;
+      if(this.chipHalf(n) === half) return n;
+    }
+    return null;
+  },
+
+  /* Chips still unplayed in a half — used to warn before they expire. */
+  chipsLeftIn(half){
+    return Object.keys(this.CHIP_SHORT).filter(c => !this.chipPlayedIn(c, half));
+  },
+
   setChip(gw, code){
-    if(!code) delete this.chips[gw];
-    else      this.chips[gw] = code;
+    if(!code){
+      delete this.chips[gw];
+      save(CONFIG.STORE.chips, this.chips);
+      emit('chips');
+      return { ok:true };
+    }
+
+    const half  = this.chipHalf(gw);
+    const clash = this.chipPlayedIn(code, half, gw);
+    if(clash != null){
+      return { ok:false, reason:`${this.CHIP_LABEL[code]} is already played in GW${clash}. You get one per half of the season — remove it there first.` };
+    }
+
+    this.chips[gw] = code;
     save(CONFIG.STORE.chips, this.chips);
     emit('chips');
+    return { ok:true };
   },
 
   /* What the captain's points get multiplied by in this GW: ×3 under
@@ -685,6 +777,9 @@ export const Store = {
       return { ok:false, reason:`GW${gw} already has ${CONFIG.SQUAD[pool.pos]} ${CONFIG.POS_LABEL[pool.pos].toLowerCase()}` };
     if(ln.memberIds.includes(pool.id)) return { ok:false, reason:'Already in this gameweek' };
 
+    const clubIssue = this.teamLimitIssue(pool, { members: mem });
+    if(clubIssue) return { ok:false, reason:clubIssue };
+
     if(!this.playerById(pool.id)){
       /* backfill-only player — mark retired at this GW so he only
          appears in past snapshots that include him, never in today's
@@ -728,6 +823,9 @@ export const Store = {
     if(!outP) return { ok:false, reason:'Outgoing player not found' };
     if(outP.pos !== pool.pos) return { ok:false, reason:`Same-position only (${outP.pos})` };
     if(ln.memberIds.includes(pool.id)) return { ok:false, reason:'Already in this GW squad' };
+
+    const clubIssue = this.teamLimitIssue(pool, { members: this._membersOfGW(gw), replacingId: outId });
+    if(clubIssue) return { ok:false, reason:clubIssue };
 
     if(!this.playerById(pool.id)){
       /* backfill-only player — see comment in addPlayerToGW */

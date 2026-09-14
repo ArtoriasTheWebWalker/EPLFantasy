@@ -1,5 +1,10 @@
 /* Run: node test/store.test.mjs
-   Guards the two scoring rules that fail silently on screen. */
+
+   Guards the rules that fail silently — either on screen (a chip week
+   that displays the wrong multiplier) or in the squad (a lineup or a
+   club count that FPL would reject but the app happily accepted).
+   Rule values are verified against the live engine's own config;
+   see the FPL 2026/27 ruleset note in the vault. */
 
 import assert from 'node:assert/strict';
 
@@ -44,4 +49,54 @@ assert.equal(Store.capMultFor(2), 3, 'Triple Captain is x3');
 assert.equal(Store.capMultFor(3), 2);
 assert.equal(Store.capMultFor(99), 2, 'no chip is x2');
 
-console.log('ok — 8 assertions passed');
+/* --- Club limit: max 3 from one real club, absolute -------------------- */
+const arsenal = 1, chelsea = 2;
+Store.squad = [
+  { id: 1, teamId: arsenal, pos: 'DEF', price: 5, outGW: null, start: true },
+  { id: 2, teamId: arsenal, pos: 'MID', price: 6, outGW: null, start: true },
+  { id: 3, teamId: arsenal, pos: 'FWD', price: 7, outGW: null, start: true },
+  { id: 4, teamId: chelsea, pos: 'DEF', price: 5, outGW: null, start: true },
+  /* a transferred-out Arsenal player must NOT count against the limit */
+  { id: 5, teamId: arsenal, pos: 'MID', price: 6, outGW: 3, start: false },
+];
+
+assert.equal(Store.countTeam(arsenal), 3, 'retired players do not occupy a club slot');
+assert.ok(Store.teamLimitIssue({ id: 9, teamId: arsenal }), 'a 4th from one club is refused');
+assert.equal(Store.teamLimitIssue({ id: 9, teamId: chelsea }), null, 'a 2nd from another club is fine');
+
+/* transferring out an Arsenal player frees his slot for another */
+assert.equal(
+  Store.teamLimitIssue({ id: 9, teamId: arsenal }, { replacingId: 3 }), null,
+  'the outgoing player frees his own club slot'
+);
+
+/* squadIssues warns but never blocks; budget only once the squad is full */
+Store.teamById = {};
+assert.ok(Store.squadIssues().every(s => typeof s === 'string'));
+
+/* the real entry points must refuse too, not just the helper */
+Store.teamById = {};
+Store.currentGW = 4;
+const fourthGunner = { id: 90, name: 'Fourth', team: 'ARS', teamId: arsenal, pos: 'DEF', price: 5.0 };
+const add = Store.addPlayer(fourthGunner);
+assert.equal(add.ok, false, 'addPlayer refuses a 4th from one club');
+assert.match(add.reason, /maximum of 3 from one club/);
+
+/* but the same player is fine when he replaces one of that club's own */
+const swap = Store.transfer(1, fourthGunner, 4);
+assert.equal(swap.ok, true, 'transfer in for a same-club player is allowed');
+
+/* --- Chips: one of each per half, first set dies at GW19 --------------- */
+Store.chips = {};
+assert.equal(Store.chipHalf(1), 1);
+assert.equal(Store.chipHalf(19), 1, 'GW19 is still the first half');
+assert.equal(Store.chipHalf(20), 2, 'GW20 starts the second set');
+
+assert.ok(Store.setChip(7, 'wildcard').ok, 'first wildcard of the half is allowed');
+assert.equal(Store.setChip(12, 'wildcard').ok, false, 'a second wildcard in the same half is refused');
+assert.ok(Store.setChip(25, 'wildcard').ok, 'the second half gets its own wildcard');
+assert.ok(Store.setChip(7, 'wildcard').ok, 're-setting the same GW is not a clash with itself');
+assert.ok(Store.setChip(9, 'bboost').ok, 'a different chip in the same half is fine');
+assert.deepEqual(Store.chipsLeftIn(1).sort(), ['3xc', 'freehit'], 'two chips still unplayed in half 1');
+
+console.log('ok — 25 assertions passed');

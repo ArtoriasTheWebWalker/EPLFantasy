@@ -136,6 +136,14 @@ export const API = {
         conceded : h.goals_conceded,
         yellow   : h.yellow_cards,
         red      : h.red_cards,
+        ownGoals : h.own_goals,
+        pensSaved: h.penalties_saved,
+        pensMissed: h.penalties_missed,
+        /* Defensive contribution: FPL already totals the right actions
+           for the position — CBIT for defenders, CBIRT (those plus ball
+           recoveries) for midfielders and forwards — so we keep the
+           total and compare it to the position threshold in CONFIG. */
+        defCon   : h.defensive_contribution,
         opponentId: h.opponent_team,
         home     : h.was_home
       }));

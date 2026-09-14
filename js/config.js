@@ -53,15 +53,37 @@ export const CONFIG = {
     settings  : 'fpl2627_settings'
   },
 
-  /* ---------- squad rules (FPL, fixed) ---------- */
+  /* ---------- squad rules (FPL, fixed) ----------
+     Verified 2026-09-14 against the live engine's own config
+     (bootstrap-static → game_config.rules + element_types).
+  ----------------------------------------------- */
   SQUAD: {
     GK:2, DEF:5, MID:5, FWD:3,
     TOTAL:15, STARTERS:11, BENCH:4,
-    START_GK:1                      // exactly one keeper starts
+    START_GK:1,                     // exactly one keeper starts
+    TEAM_LIMIT:3,                   // squad_team_limit — max per real club, absolute
+    BUDGET:100.0                    // squad_total_spend 1000 ÷ ui_currency_multiplier 10
   },
 
   POS_ORDER: ['GK','DEF','MID','FWD'],
   POS_LABEL: { GK:'Goalkeepers', DEF:'Defenders', MID:'Midfielders', FWD:'Forwards' },
+
+  /* ---------- defensive contribution ----------
+     Hit the threshold in a match and you get a flat +2, capped.
+     Defenders count CBIT (clearances, blocks, interceptions,
+     tackles); midfielders and forwards count CBIRT — the same four
+     PLUS ball recoveries — against a higher bar. Keepers aren't
+     eligible. The API's defensive_contribution field already holds
+     the right total per position, so we only need the threshold.
+  --------------------------------------------- */
+  DEFCON: { DEF:10, MID:12, FWD:12 },
+  DEFCON_POINTS: 2,
+
+  /* ---------- chips ----------
+     Two sets across the season: one of each per half. The first set
+     expires at the GW19 deadline and does NOT carry over.
+  ---------------------------- */
+  CHIP_HALF_END: 19,               // last GW of the first set
 
   /* ---------- grade thresholds ----------
      ratio = player points / position average that week
