@@ -65,7 +65,7 @@ const SquadShape = `
 
   Store.lineups[gw] snapshots WHO was in the XI / bench for that GW:
   { memberIds:[15], starterIds:[11] }. Written on every mutation to
-  lineups[currentGW]; past GWs are frozen (never overwritten).`;
+  lineups[editableGW()]; past GWs are frozen (never overwritten).`;
 
 export const Store = {
 
@@ -117,6 +117,36 @@ export const Store = {
      be corrected to match reality. Every GW after this is locked. */
   BACKFILL_UNTIL: 4,
   isBackfillGW(gw){ return gw >= 1 && gw <= this.BACKFILL_UNTIL && gw < this.currentGW; },
+
+  /* =================================================
+     WHICH GAMEWEEK AM I ACTUALLY EDITING?
+
+     currentGW is what FPL calls "current", which stays put for days
+     after that gameweek's deadline has passed. Editing in that window
+     is planning for the NEXT gameweek — but the old code snapshotted
+     every change into lineups[currentGW], rewriting a finished week's
+     record, and the Performance page showed the live working squad in
+     place of what was actually fielded.
+
+     editableGW() is the honest answer: the gameweek your team sheet
+     still counts for. Everything that mutates a team sheet — the
+     snapshot, the armband, the chip, a transfer — targets this, never
+     currentGW. Falls back to currentGW when deadlines are unknown
+     (offline / cached boot), which is the old behaviour.
+  ================================================= */
+
+  deadlines : {},     // { gw: epoch ms }, from API.bootstrap()
+
+  deadlinePassed(gw){
+    const t = this.deadlines?.[gw];
+    return t != null && Date.now() >= t;
+  },
+
+  editableGW(){
+    return this.deadlinePassed(this.currentGW)
+      ? Math.min(this.currentGW + 1, CONFIG.TOTAL_GW)
+      : this.currentGW;
+  },
 
   /* runtime only, not persisted */
   pool      : [],     // all FPL players, from API.bootstrap()
@@ -341,7 +371,7 @@ export const Store = {
 
     if(this._isInAnySnapshot(id)){
       /* mark as gone from the current squad, preserve for past renders */
-      p.outGW = this.currentGW;
+      p.outGW = this.editableGW();
       p.start = false;
     }else{
       /* never locked into a past lineup — safe to drop */
@@ -351,7 +381,7 @@ export const Store = {
     delete this.draft[id];
     /* also wipe any FUTURE armband slot he still holds — past GW
        snapshots keep him as they were */
-    const cw = this.currentGW;
+    const cw = this.editableGW();
     if(this.captains[cw] === id) delete this.captains[cw];
     if(this.vices[cw]    === id) delete this.vices[cw];
     this.persistSquad();
@@ -373,7 +403,7 @@ export const Store = {
     const clubIssue = this.teamLimitIssue(poolPlayer, { replacingId: outId });
     if(clubIssue) return { ok:false, reason:clubIssue };
 
-    const tGW = gw ?? this.currentGW;
+    const tGW = gw ?? this.editableGW();
     out.outGW = tGW;
     /* clear his start flag so the incoming player inherits the slot */
     const wasStarting = out.start;
@@ -402,8 +432,9 @@ export const Store = {
       });
     }
 
-    /* if the outgoing player was carrying the current armband, drop it */
-    const cw = this.currentGW;
+    /* if the outgoing player was carrying the armband for the gameweek
+       we're editing, drop it — past gameweeks keep theirs */
+    const cw = tGW;
     if(this.captains[cw] === outId) delete this.captains[cw];
     if(this.vices[cw]    === outId) delete this.vices[cw];
     delete this.draft[outId];
@@ -433,14 +464,14 @@ export const Store = {
   },
 
   setCaptain(id, gw){
-    const target = gw ?? this.currentGW;
+    const target = gw ?? this.editableGW();
     this.captains[target] = id;
     if(this.vices[target] === id) delete this.vices[target];   // can't be both
     this.persistCaps();
   },
 
   setVice(id, gw){
-    const target = gw ?? this.currentGW;
+    const target = gw ?? this.editableGW();
     this.vices[target] = id;
     if(this.captains[target] === id) delete this.captains[target];
     this.persistCaps();
@@ -917,9 +948,10 @@ export const Store = {
   },
 
   persistSquad(){
-    /* keep lineups[currentGW] in sync with the working state so it's
-       ready to become the frozen record when the deadline passes */
-    this.snapshotLineup(this.currentGW);
+    /* Snapshot the gameweek these edits actually count for. Once a
+       deadline has passed that is the NEXT gameweek — snapshotting
+       currentGW there would overwrite a finished week's record. */
+    this.snapshotLineup(this.editableGW());
     save(CONFIG.STORE.squad, this.squad);
     this.persistLineups();
     emit('squad');

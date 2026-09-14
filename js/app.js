@@ -105,6 +105,7 @@ async function boot(){
     Store.teamById  = boot.teamById;
     Store.currentGW = boot.currentGW;
     Store.viewGW    = boot.currentGW;
+    Store.deadlines = boot.deadlines || {};
 
     /* Legacy squads carry cap/vice flags on the player. Now that the
        armband is per-GW, seed those into the maps once the real GW is

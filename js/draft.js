@@ -11,8 +11,9 @@
      • shortlist of candidates per position
 
    Colours on the pitch = season form. The armband badges
-   show the captain / vice for the CURRENT GW so you can
-   see what you've picked for this week.
+   show the captain / vice for the gameweek you are actually
+   editing — which is the NEXT one once the current
+   gameweek's deadline has passed.
 ===================================================== */
 
 import { CONFIG } from './config.js';
@@ -86,8 +87,9 @@ const Draft = {
     const st = Store.draftOf(p.id);
     const label = FLAGS.find(f=>f.key===st.flag)?.label || 'Hold';
 
-    const capId  = Store.captainIdOf(Store.currentGW);
-    const viceId = Store.viceIdOf(Store.currentGW);
+    const gwNow  = Store.editableGW();
+    const capId  = Store.captainIdOf(gwNow);
+    const viceId = Store.viceIdOf(gwNow);
 
     const el = chipEl(p, {
       grade  : g.grade,
@@ -243,7 +245,7 @@ const Draft = {
     const g    = Store.gradeSeason(p);
     const runs = fixtureRunHTML(p.teamId, 5);
 
-    const gw   = Store.currentGW;
+    const gw   = Store.editableGW();
     const isCap  = Store.captainIdOf(gw) === p.id;
     const isVice = Store.viceIdOf(gw)    === p.id;
 
@@ -357,7 +359,7 @@ const Draft = {
       exclude: Store.activeSquad().map(x=>x.id),
       placeholder: `Replace ${p.name} with…`,
       onPick: player => {
-        const res = Store.transfer(p.id, player, Store.currentGW);
+        const res = Store.transfer(p.id, player, Store.editableGW());
         if(!res.ok){ alert(res.reason); return; }
         this.backfill(player.id);
         Modal.close();
@@ -450,7 +452,7 @@ const Draft = {
         <select class="sel-gw">
           <option value="">— GW —</option>
           ${Array.from({length:CONFIG.TOTAL_GW},(_,i)=>i+1)
-            .filter(gw=>gw >= Store.currentGW)
+            .filter(gw=>gw >= Store.editableGW())
             .map(gw=>`<option value="${gw}" ${c.targetGW===gw?'selected':''}>GW${gw}</option>`).join('')}
         </select>
       </div>

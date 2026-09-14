@@ -99,4 +99,46 @@ assert.ok(Store.setChip(7, 'wildcard').ok, 're-setting the same GW is not a clas
 assert.ok(Store.setChip(9, 'bboost').ok, 'a different chip in the same half is fine');
 assert.deepEqual(Store.chipsLeftIn(1).sort(), ['3xc', 'freehit'], 'two chips still unplayed in half 1');
 
-console.log('ok — 25 assertions passed');
+/* --- Editing after a deadline belongs to the NEXT gameweek ------------
+   FPL keeps calling a gameweek "current" for days after its deadline.
+   Editing in that window used to snapshot over the finished week's
+   record, and the Performance page showed today's squad as if it were
+   what you fielded. editableGW() is what every team-sheet write uses. */
+const HOUR = 3600e3;
+Store.currentGW = 4;
+
+/* before the deadline: still editing GW4 */
+Store.deadlines = { 4: Date.now() + HOUR, 5: Date.now() + 100 * HOUR };
+assert.equal(Store.deadlinePassed(4), false);
+assert.equal(Store.editableGW(), 4, 'before the deadline, edits are for GW4');
+
+/* after it: edits are for GW5, and GW4 is now history */
+Store.deadlines = { 4: Date.now() - HOUR, 5: Date.now() + 100 * HOUR };
+assert.equal(Store.deadlinePassed(4), true);
+assert.equal(Store.editableGW(), 5, 'after the deadline, edits are for GW5');
+
+/* a snapshot must land on GW5 and leave the GW4 record untouched */
+Store.squad = [
+  { id: 201, teamId: 1, pos: 'GK',  price: 4.5, outGW: null, start: true },
+  { id: 202, teamId: 2, pos: 'DEF', price: 4.5, outGW: null, start: true },
+  { id: 203, teamId: 3, pos: 'DEF', price: 4.5, outGW: null, start: false },
+];
+Store.lineups = { 4: { memberIds: [201, 202], starterIds: [201, 202] } };
+Store.persistSquad();
+assert.deepEqual(Store.lineups[4].starterIds, [201, 202], 'GW4 record must survive an edit');
+assert.ok(Store.lineups[5], 'the edit is snapshotted into GW5');
+assert.deepEqual(Store.lineups[5].starterIds, [201, 202]);
+assert.deepEqual(Store.lineups[5].memberIds, [201, 202, 203]);
+
+/* unknown deadlines (offline boot) fall back to the old behaviour */
+Store.deadlines = {};
+assert.equal(Store.editableGW(), 4, 'no deadline data -> fall back to currentGW');
+
+/* the armband follows the same rule */
+Store.deadlines = { 4: Date.now() - HOUR };
+Store.captains = {}; Store.vices = {};
+Store.setCaptain(202);
+assert.equal(Store.captains[5], 202, 'captain set with no gw targets the editable gameweek');
+assert.equal(Store.captains[4], undefined, 'and never the finished one');
+
+console.log('ok — 37 assertions passed');

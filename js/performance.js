@@ -59,7 +59,11 @@ const Performance = {
                    edits target lineups[viewGW] not the working state.
        locked    → past AND outside the backfill window. Read-only for
                    squad/XI; armband only. */
-  isPastGW(){ return !Store.seasonMode && Store.viewGW < Store.currentGW; },
+  /* A gameweek is "past" once its deadline has gone, not merely once
+     FPL stops calling it current — otherwise the week you've just
+     played renders today's working squad instead of what you fielded,
+     and every Draft edit appears to rewrite its live score. */
+  isPastGW(){ return !Store.seasonMode && Store.viewGW < Store.editableGW(); },
   isBackfillGW(){ return this.isPastGW() && Store.isBackfillGW(Store.viewGW); },
   isLockedGW(){   return this.isPastGW() && !this.isBackfillGW(); },
 

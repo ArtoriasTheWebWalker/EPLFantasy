@@ -99,7 +99,14 @@ export const API = {
         teams     : Object.values(teamById),
         teamById,
         currentGW : currentEvent ? currentEvent.id : 1,
-        finishedGW: raw.events.filter(ev=>ev.finished).length
+        finishedGW: raw.events.filter(ev=>ev.finished).length,
+        /* Deadline per gameweek, epoch ms. Needed because "current" and
+           "still editable" are NOT the same thing: a gameweek stays
+           is_current for days after its deadline has passed, and edits
+           made in that window belong to the NEXT gameweek. */
+        deadlines : Object.fromEntries(
+          raw.events.map(ev => [ev.id, Date.parse(ev.deadline_time)])
+        )
       };
 
       writeCache(CONFIG.STORE.bootstrap, out);
