@@ -1,21 +1,24 @@
 /* =====================================================
-   PERFORMANCE PAGE — EDITABLE (backfill mode)
+   PERFORMANCE PAGE — READ ONLY
 
-   Shows the squad as it actually performed, and lets you
-   edit players / captain / vice for the CURRENTLY VIEWED
-   gameweek. This is deliberately editable right now so
-   past-GW captains can be backfilled after the per-GW
-   captain fix — pick a past GW pill, tap a player, hit
-   "Make captain" and it stores against that GW alone.
+   The record of what actually happened: the squad as it
+   performed, week by week, plus the captain, bench and
+   transfer reviews.
 
-   Every editing action here also happens on Draft; Draft
-   remains the primary planning surface for future weeks.
+   NOTHING on this page edits anything. No add slots, no
+   drag-and-drop, no transfers, no armband, no chips. Tap
+   a shirt and you get his points breakdown; that is the
+   only interaction. All editing lives on the Draft page,
+   which is the single place a team sheet is written.
+
+   Keeping it that way matters: this page renders finished
+   gameweeks from frozen snapshots, so an edit made here
+   would be editing history.
 ===================================================== */
 
 import { CONFIG } from './config.js';
-import { API }    from './api.js';
 import { Store }  from './store.js';
-import { Modal, chipEl, slotEl, searchBox, apiBanner, emptyNote, chipSelectHTML } from './ui.js';
+import { Modal, chipEl, apiBanner, emptyNote } from './ui.js';
 
 /* concrete grade colours (kept in sync with css :root) — used where an
    inline SVG needs a real colour value rather than a CSS variable */
@@ -52,20 +55,11 @@ const Performance = {
     window.addEventListener('resize', settle);
   },
 
-  /* GW state under this view:
-       past      → viewGW < currentGW (any past week)
-       backfill  → past AND still in the one-time backfill window
-                   (GW1..Store.BACKFILL_UNTIL). Fully editable, but
-                   edits target lineups[viewGW] not the working state.
-       locked    → past AND outside the backfill window. Read-only for
-                   squad/XI; armband only. */
   /* A gameweek is "past" once its deadline has gone, not merely once
      FPL stops calling it current — otherwise the week you've just
      played renders today's working squad instead of what you fielded,
      and every Draft edit appears to rewrite its live score. */
   isPastGW(){ return !Store.seasonMode && Store.viewGW < Store.editableGW(); },
-  isBackfillGW(){ return this.isPastGW() && Store.isBackfillGW(Store.viewGW); },
-  isLockedGW(){   return this.isPastGW() && !this.isBackfillGW(); },
 
   render(){
     document.getElementById('perfBanner').innerHTML = apiBanner(Store.apiState || 'offline');
@@ -103,9 +97,9 @@ const Performance = {
   },
 
   /* -------------------------------------------------
-     the pitch — per-GW lineup. Past GWs read frozen
-     snapshots from Store.lineups[gw]; the current GW
-     reads the working state and stays editable.
+     the pitch — per-GW lineup, display only. Past GWs
+     read frozen snapshots from Store.lineups[gw]; the
+     live one reads the working squad set on Draft.
   ------------------------------------------------- */
   renderPitch(){
     const pitch = document.getElementById('pitchArea');
@@ -113,69 +107,22 @@ const Performance = {
     pitch.innerHTML = '<div class="goalmouth"></div>';
     bench.innerHTML = '';
 
-    const past     = this.isPastGW();
-    const backfill = this.isBackfillGW();
-    const gw       = Store.seasonMode ? Store.currentGW : Store.viewGW;
+    const past = this.isPastGW();
+    const gw   = Store.seasonMode ? Store.currentGW : Store.viewGW;
 
+    /* Past gameweeks read their frozen snapshot; the live one reads the
+       working squad. No empty slots — this page never adds a player. */
     const starters = past ? Store.startersForGW(gw) : Store.starters();
     const benched  = past ? Store.benchForGW(gw)    : Store.bench();
-
-    /* how many of `pos` can still be added to THIS view */
-    const spaceForInView = (pos) => {
-      if(!past) return Store.spaceFor(pos);
-      if(!backfill) return 0;
-      const members = Store.squadForGW(gw);
-      return CONFIG.SQUAD[pos] - members.filter(p=>p.pos===pos).length;
-    };
 
     CONFIG.POS_ORDER.forEach(pos=>{
       const row = document.createElement('div');
       row.className = 'p-row' + (pos==='GK' ? ' gk' : '');
-
-      const inRow = starters.filter(p=>p.pos===pos);
-      inRow.forEach(p => row.appendChild(this.playerChip(p)));
-
-      /* empty add-slots on the pitch: current GW always; past GWs
-         only in the backfill window (locked past GWs stay untouched) */
-      if(!past || backfill){
-        const wanted  = Store.MIN_START[pos];
-        const missing = Math.max(0, Math.min(wanted - inRow.length, spaceForInView(pos)));
-        for(let i=0;i<missing;i++){
-          row.appendChild(slotEl(pos, ()=>this.openAddPlayer(pos)));
-        }
-      }
-
+      starters.filter(p=>p.pos===pos).forEach(p => row.appendChild(this.playerChip(p)));
       if(row.children.length) pitch.appendChild(row);
     });
 
     benched.forEach(p => bench.appendChild(this.playerChip(p)));
-
-    if(!past || backfill){
-      const totalMembers = past
-        ? Store.squadForGW(gw).length
-        : Store.activeSquad().length;
-      const benchMissing = Math.min(
-        CONFIG.SQUAD.BENCH - benched.length,
-        CONFIG.SQUAD.TOTAL - totalMembers
-      );
-      for(let i=0;i<Math.max(0, benchMissing);i++){
-        const nextPos = this.nextNeededPositionInView();
-        bench.appendChild(slotEl(nextPos || 'ADD', ()=>this.openAddPlayer(nextPos)));
-      }
-    }
-  },
-
-  nextNeededPositionInView(){
-    if(!this.isPastGW()) return this.nextNeededPosition();
-    const gw = Store.viewGW;
-    const members = Store.squadForGW(gw);
-    return CONFIG.POS_ORDER.find(pos =>
-      CONFIG.SQUAD[pos] - members.filter(p=>p.pos===pos).length > 0
-    ) || null;
-  },
-
-  nextNeededPosition(){
-    return CONFIG.POS_ORDER.find(pos => Store.spaceFor(pos) > 0) || null;
   },
 
   /* one chip. Captain / vice come from the map keyed on the viewed GW
@@ -214,105 +161,20 @@ const Performance = {
       meta   : Store.seasonMode
                  ? `${p.team} · season`
                  : `${p.team} · £${p.price.toFixed(1)}m`
-      /* no onClick — makeInteractive tells a tap from a drag */
+      /* no onClick here — openOnTap wires it */
     });
 
-    this.makeInteractive(chip, p);
+    this.openOnTap(chip, p);
     return chip;
   },
 
-  /* -------------------------------------------------
-     drag-and-drop (desktop + mobile via Pointer Events)
-       • short press that doesn't move = tap = open modal
-       • press that moves past the threshold = drag
-       • drop onto another shirt = Store.swapLineup(...)
-  ------------------------------------------------- */
-  makeInteractive(chip, p){
-    /* past GWs skip the drag gesture entirely — reordering XI/bench
-       on a past GW is done through the modal buttons so the write
-       clearly targets that GW's snapshot */
-    if(this.isPastGW()){
-      chip.onclick = () => this.openPlayer(p);
-      return;
-    }
-
-    chip.style.touchAction = 'none';
-    const THRESH = 8;
-    let sx = 0, sy = 0, dragging = false, ghost = null, target = null;
-
-    const onMove = e => {
-      const dx = e.clientX - sx, dy = e.clientY - sy;
-      if(!dragging && Math.hypot(dx, dy) < THRESH) return;
-
-      if(!dragging){
-        dragging = true;
-        chip.classList.add('dragging');
-        ghost = chip.cloneNode(true);
-        ghost.classList.add('drag-ghost');
-        ghost.classList.remove('dragging');
-        ghost.removeAttribute('data-pid');
-        document.body.appendChild(ghost);
-      }
-      ghost.style.left = e.clientX + 'px';
-      ghost.style.top  = e.clientY + 'px';
-
-      const t = this.chipUnder(e.clientX, e.clientY, chip);
-      if(t !== target){
-        target?.classList.remove('drop-hover');
-        target = t;
-        target?.classList.add('drop-hover');
-      }
-    };
-
-    const onUp = e => {
-      chip.removeEventListener('pointermove', onMove);
-      chip.removeEventListener('pointerup', onUp);
-      chip.removeEventListener('pointercancel', onUp);
-
-      if(!dragging){
-        /* swallow the touch-synthetic click that would land on the modal */
-        const swallow = ev => { ev.stopPropagation(); ev.preventDefault(); };
-        document.addEventListener('click', swallow, { capture: true, once: true });
-        setTimeout(() => document.removeEventListener('click', swallow, true), 500);
-        this.openPlayer(p);
-        return;
-      }
-
-      chip.classList.remove('dragging');
-      ghost?.remove(); ghost = null;
-      target?.classList.remove('drop-hover');
-
-      const drop = this.chipUnder(e.clientX, e.clientY, chip);
-      if(drop){
-        const otherId = +drop.dataset.pid;
-        const r = Store.swapLineup(p.id, otherId);
-        if(!r.ok && r.reason) alert(r.reason);
-        this.render();
-      }
-    };
-
-    chip.addEventListener('pointerdown', e => {
-      if(e.pointerType === 'mouse' && e.button !== 0) return;
-      sx = e.clientX; sy = e.clientY; dragging = false; target = null;
-      chip.setPointerCapture?.(e.pointerId);
-      chip.addEventListener('pointermove', onMove);
-      chip.addEventListener('pointerup', onUp);
-      chip.addEventListener('pointercancel', onUp);
-    });
+  /* Tap a shirt for the breakdown. That is the only interaction on this
+     page: Performance is a record, not an editor. Selection, transfers
+     and the armband all live on the Draft page. */
+  openOnTap(chip, p){
+    chip.onclick = () => this.openPlayer(p);
   },
 
-  chipUnder(x, y, exclude){
-    const els = document.elementsFromPoint(x, y);
-    for(const el of els){
-      const c = el.closest?.('.chip');
-      if(c && c !== exclude && !c.classList.contains('drag-ghost') && c.dataset.pid) return c;
-    }
-    return null;
-  },
-
-  /* -------------------------------------------------
-     star players
-  ------------------------------------------------- */
   renderStars(){
     const row = document.getElementById('starsRow');
 
@@ -468,72 +330,6 @@ const Performance = {
     el.innerHTML = `${head}${warn}${legalWarn}<div class="quota">${quota}</div>`;
   },
 
-  /* =================================================
-     ADD PLAYER — routes to current-GW or past-GW (backfill)
-     depending on the view.
-  ================================================= */
-  openAddPlayer(pos){
-    const backfill = this.isBackfillGW();
-    const gw = backfill ? Store.viewGW : Store.currentGW;
-
-    const posCountFn = backfill
-      ? (p) => Store.squadForGW(gw).filter(x=>x.pos===p).length
-      : (p) => Store.countPos(p);
-    const totalFn = backfill
-      ? () => Store.squadForGW(gw).length
-      : () => Store.activeSquad().length;
-
-    const spaceFor = (p) => CONFIG.SQUAD[p] - posCountFn(p);
-    const targetPos = pos && spaceFor(pos) > 0
-      ? pos
-      : CONFIG.POS_ORDER.find(p => spaceFor(p) > 0) || null;
-
-    if(!targetPos){
-      Modal.open(`<h3>Squad is full for GW${gw}</h3>
-        <div class="m-meta">15 players · 2 GK, 5 DEF, 5 MID, 3 FWD</div>`);
-      return;
-    }
-
-    const excludeIds = backfill
-      ? Store.squadForGW(gw).map(p=>p.id)
-      : Store.activeSquad().map(p=>p.id);
-
-    const sb = searchBox({
-      pos: targetPos,
-      exclude: excludeIds,
-      onPick: player => {
-        const res = backfill
-          ? Store.addPlayerToGW(player, gw)
-          : Store.addPlayer(player);
-        if(!res.ok){ alert(res.reason); return; }
-        if(!backfill) this.backfill(player.id);
-        Modal.close();
-        this.render();
-      }
-    });
-
-    Modal.open(`
-      <h3>Add a ${CONFIG.POS_LABEL[targetPos].replace(/s$/,'')}${backfill ? ` — GW${gw}` : ''}</h3>
-      <div class="m-meta">${posCountFn(targetPos)}/${CONFIG.SQUAD[targetPos]} ${CONFIG.POS_LABEL[targetPos].toLowerCase()} · ${totalFn()}/15 total${backfill ? ` (backfilling GW${gw})` : ''}</div>
-      ${sb.html}`);
-    sb.bind();
-  },
-
-  async backfill(id){
-    const hist = await API.playerHistory(id);
-    if(hist){
-      const p = Store.squad.find(x=>x.id===id);
-      if(p){ p.history = hist; Store.persistSquad(); }
-    }
-  },
-
-  /* =================================================
-     PLAYER MODAL — breakdown + edit for the VIEWED GW
-  ================================================= */
-
-  /* what GW should the armband edits target? */
-  armbandGW(){ return Store.seasonMode ? Store.currentGW : Store.viewGW; },
-
   openPlayer(p){
     Store.seasonMode ? this.seasonModal(p) : this.gwModal(p);
   },
@@ -541,10 +337,6 @@ const Performance = {
   gwModal(p){
     const g = Store.gradeGW(p, Store.viewGW);
     const h = p.history?.find(x=>x.gw===Store.viewGW);
-
-    const armGW = this.armbandGW();
-    const isCap  = Store.captainIdOf(armGW) === p.id;
-    const isVice = Store.viceIdOf(armGW)    === p.id;
 
     const breakdown = h ? this.breakdownRows(h, p.pos) : '';
     const spark = this.sparklineSVG(p.history, GRADE_HEX[g.grade] || GRADE_HEX.lime);
@@ -556,24 +348,14 @@ const Performance = {
       ? `<span class="m-grade" style="--grade:var(--lime);margin-left:6px">Captain ×${capMult}${eff.fallback?' · via vice':''}</span>`
       : '';
 
-    const past     = this.isPastGW();
-    const backfill = this.isBackfillGW();
-    const locked   = past && !backfill;
-
-    /* on the current GW `p.start` reflects reality; on a past GW we
-       ask the snapshot whether he started that week */
-    const startedThisGW = past
+    const chip = Store.chipOf(Store.viewGW);
+    const started = this.isPastGW()
       ? Store.startersForGW(Store.viewGW).some(x => x.id === p.id)
       : p.start;
 
-    /* label the header state so the user knows what they can edit */
-    const stateTag = locked   ? ' · <span class="vtag">locked</span>'
-                   : backfill ? ` · <span class="vtag" style="background:var(--amber);color:#000">backfill · GW${Store.viewGW}</span>`
-                   : '';
-
     Modal.open(`
       <h3>${p.name}</h3>
-      <div class="m-meta">${p.team} · ${p.pos} · £${p.price.toFixed(1)}m · GW${Store.viewGW}${stateTag}</div>
+      <div class="m-meta">${p.team} · ${p.pos} · £${p.price.toFixed(1)}m · GW${Store.viewGW} · ${started ? 'started' : 'benched'}${chip ? ` · ${Store.CHIP_LABEL[chip]}` : ''}</div>
       ${g.grade ? `<span class="m-grade" style="--grade:var(--${g.grade})">${CONFIG.GRADE_WORD[g.grade]}</span>${capTag}` : capTag}
 
       ${spark ? `<div class="m-sec"><h4>Season form — last ${p.history.length} weeks</h4>${spark}</div>` : ''}
@@ -581,42 +363,13 @@ const Performance = {
       ${h ? `<div class="m-sec"><h4>Points breakdown</h4>${breakdown}${isEffCap && h.points!=null ? `<div class="break-row total" style="border-top:none"><span>Captain ×${capMult}</span><span>${h.points*capMult}</span></div>` : ''}</div>`
           : `<div class="hint-line">No data for GW${Store.viewGW} yet.</div>`}
 
-      <div class="m-sec">
-        <h4>Armband — GW${armGW}</h4>
-        <div class="m-actions">
-          <button class="m-btn ${isCap?'on':'primary'}" id="btnCap">${isCap?'Captain ✓':'Make captain'}</button>
-          <button class="m-btn ${isVice?'on':''}" id="btnVice">${isVice?'Vice ✓':'Make vice'}</button>
-        </div>
-      </div>
-
-      ${!locked ? `
-        <div class="m-sec">
-          <h4>Chip — GW${armGW}</h4>
-          ${chipSelectHTML(armGW)}
-        </div>` : ''}
-
-      ${locked
-        ? ''
-        : `<div class="m-actions">
-             <button class="m-btn" id="btnStart">${startedThisGW ? `Move to bench for GW${Store.viewGW}` : `Move to XI for GW${Store.viewGW}`}</button>
-           </div>
-           <div class="m-actions">
-             <button class="m-btn warn" id="btnSwap">⇄ ${backfill ? `Swap for GW${Store.viewGW}` : 'Transfer this player'}</button>
-             <button class="m-btn danger" id="btnRemove">${backfill ? `Remove from GW${Store.viewGW}` : 'Remove'}</button>
-           </div>
-           <div class="swap-panel" id="swapPanel"></div>`}
+      <div class="hint-line">Transfers, the armband and chips are set on the Draft page.</div>
     `, `var(--${g.grade||'lime'})`);
-
-    this.wireModalActions(p, armGW);
   },
 
   seasonModal(p){
     const g = Store.gradeSeason(p);
     const hist = p.history || [];
-
-    const armGW = this.armbandGW();
-    const isCap  = Store.captainIdOf(armGW) === p.id;
-    const isVice = Store.viceIdOf(armGW)    === p.id;
 
     const cells = hist.map(h=>{
       const gg = Store.gradeGW(p, h.gw);
@@ -640,25 +393,8 @@ const Performance = {
         </div>`
       : `<div class="hint-line">No season history yet.</div>`}
 
-      <div class="m-sec">
-        <h4>Armband — GW${armGW}</h4>
-        <div class="m-actions">
-          <button class="m-btn ${isCap?'on':'primary'}" id="btnCap">${isCap?'Captain ✓':'Make captain'}</button>
-          <button class="m-btn ${isVice?'on':''}" id="btnVice">${isVice?'Vice ✓':'Make vice'}</button>
-        </div>
-      </div>
-
-      <div class="m-actions">
-        <button class="m-btn" id="btnStart">${p.start?'Move to bench':'Move to XI'}</button>
-      </div>
-      <div class="m-actions">
-        <button class="m-btn warn" id="btnSwap">⇄ Transfer this player</button>
-        <button class="m-btn danger" id="btnRemove">Remove</button>
-      </div>
-      <div class="swap-panel" id="swapPanel"></div>
+      <div class="hint-line">Transfers, the armband and chips are set on the Draft page.</div>
     `, `var(--${g.grade||'lime'})`);
-
-    this.wireModalActions(p, armGW);
   },
 
   breakdownRows(h, pos){
@@ -747,86 +483,6 @@ const Performance = {
      modal buttons — captain/vice target the ARMBAND GW
      (the viewed GW in single-GW mode, currentGW in season)
   ------------------------------------------------- */
-  wireModalActions(p, armGW){
-    const backfill = this.isBackfillGW();
-    const gw       = Store.viewGW;
-
-    const cap = document.getElementById('btnCap');
-    if(cap) cap.onclick = () => { Store.setCaptain(p.id, armGW); Modal.close(); this.render(); };
-
-    const vice = document.getElementById('btnVice');
-    if(vice) vice.onclick = () => { Store.setVice(p.id, armGW); Modal.close(); this.render(); };
-
-    const chipSel = document.getElementById('chipSel');
-    if(chipSel) chipSel.onchange = () => {
-      const r = Store.setChip(armGW, chipSel.value);
-      if(!r.ok){
-        alert(r.reason);
-        chipSel.value = Store.chipOf(armGW) || '';   // put the select back
-        return;
-      }
-      this.render();
-    };
-
-    const st = document.getElementById('btnStart');
-    if(st) st.onclick = () => {
-      let r;
-      if(backfill){
-        const startedThisGW = Store.startersForGW(gw).some(x => x.id === p.id);
-        r = startedThisGW ? Store.benchInGW(p.id, gw) : Store.startInGW(p.id, gw);
-      } else {
-        r = Store.toggleStart(p.id);
-      }
-      if(!r.ok){ alert(r.reason); return; }
-      Modal.close(); this.render();
-    };
-
-    const rm = document.getElementById('btnRemove');
-    if(rm) rm.onclick = () => {
-      const msg = backfill
-        ? `Remove ${p.name} from your GW${gw} squad? (Today's squad stays as it is.)`
-        : `Remove ${p.name} from your squad?`;
-      if(!confirm(msg)) return;
-      if(backfill) Store.removePlayerFromGW(p.id, gw);
-      else Store.removePlayer(p.id);
-      Modal.close(); this.render();
-    };
-
-    const sw = document.getElementById('btnSwap');
-    if(sw) sw.onclick = () => this.openSwap(p);
-  },
-
-  openSwap(p){
-    const panel = document.getElementById('swapPanel');
-    if(panel.dataset.open === '1'){ panel.innerHTML=''; panel.dataset.open='0'; return; }
-
-    const backfill = this.isBackfillGW();
-    const gw       = Store.viewGW;
-
-    const excludeIds = backfill
-      ? Store.squadForGW(gw).map(x=>x.id)
-      : Store.activeSquad().map(x=>x.id);
-
-    const sb = searchBox({
-      pos: p.pos,
-      exclude: excludeIds,
-      placeholder: backfill ? `Replace ${p.name} in GW${gw} with…` : `Replace ${p.name} with…`,
-      onPick: player => {
-        const res = backfill
-          ? Store.transferInGW(p.id, player, gw)
-          : Store.transfer(p.id, player, Store.viewGW);
-        if(!res.ok){ alert(res.reason); return; }
-        this.backfill(player.id);
-        Modal.close();
-        this.render();
-      }
-    });
-
-    panel.innerHTML = sb.html;
-    panel.dataset.open = '1';
-    sb.bind();
-  },
-
   /* =================================================
      CAPTAIN / BENCH / TRANSFERS slides
   ================================================= */
