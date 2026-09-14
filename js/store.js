@@ -128,6 +128,42 @@ export const Store = {
 
   activeSquad(){ return this.squad.filter(p => p.outGW == null); },
 
+  /* Collapse duplicate rows for the same id in Store.squad. Can happen
+     if a retired player (outGW set) got re-added via addPlayer/transfer
+     instead of being reactivated — both used to guard against dupes
+     with has(), which only looks at ACTIVE members, so a retired id
+     slipped past it and got pushed as a brand-new second row. Once
+     that happens, syncFromFPL's rebuild only ever touches the FIRST
+     row it finds for an id, so the extra row(s) never get corrected —
+     an active duplicate can silently push the XI to 12+ starters.
+     Keeps one row per id (prefers an active copy if any exist, merges
+     history from all copies), idempotent, safe to call any time. */
+  dedupeSquad(){
+    const byId = new Map();
+    for(const p of this.squad){
+      const kept = byId.get(p.id);
+      if(!kept){ byId.set(p.id, p); continue; }
+
+      const winner = kept.outGW == null ? kept : (p.outGW == null ? p : kept);
+      const loser  = winner === kept ? p : kept;
+
+      const ins = [kept.inGW, p.inGW].filter(x => x != null);
+      winner.inGW = ins.length ? Math.min(...ins) : null;
+
+      const histByGW = new Map();
+      for(const h of [...(kept.history||[]), ...(p.history||[])]) histByGW.set(h.gw, h);
+      winner.history = [...histByGW.values()].sort((a,b)=>a.gw-b.gw);
+
+      void loser;
+      byId.set(p.id, winner);
+    }
+    const deduped = [...byId.values()];
+    if(deduped.length === this.squad.length) return false;
+    this.squad = deduped;
+    save(CONFIG.STORE.squad, this.squad);
+    return true;
+  },
+
   countPos(pos){ return this.activeSquad().filter(p=>p.pos===pos).length; },
 
   countStart(pos){ return this.activeSquad().filter(p=>p.pos===pos && p.start).length; },
@@ -195,18 +231,28 @@ export const Store = {
     let startFlag = start;
     if(startFlag === null) startFlag = this.wouldStart(poolPlayer.pos);
 
-    this.squad.push({
-      id: poolPlayer.id,
-      name: poolPlayer.name,
-      team: poolPlayer.team,
-      teamId: poolPlayer.teamId,
-      pos: poolPlayer.pos,
-      price: poolPlayer.price,
-      start: startFlag,
-      inGW: null,
-      outGW: null,
-      history: []
-    });
+    /* he may already have a row from an earlier stint (transferred out,
+       now coming back) — reactivate it instead of pushing a duplicate
+       row for the same id (has() above only rules out ACTIVE members) */
+    const existing = this.playerById(poolPlayer.id);
+    if(existing){
+      existing.outGW = null;
+      existing.start = startFlag;
+      existing.price = poolPlayer.price;
+    }else{
+      this.squad.push({
+        id: poolPlayer.id,
+        name: poolPlayer.name,
+        team: poolPlayer.team,
+        teamId: poolPlayer.teamId,
+        pos: poolPlayer.pos,
+        price: poolPlayer.price,
+        start: startFlag,
+        inGW: null,
+        outGW: null,
+        history: []
+      });
+    }
     this.persistSquad();
     return { ok:true };
   },
@@ -263,18 +309,28 @@ export const Store = {
     const wasStarting = out.start;
     out.start = false;
 
-    this.squad.push({
-      id: poolPlayer.id,
-      name: poolPlayer.name,
-      team: poolPlayer.team,
-      teamId: poolPlayer.teamId,
-      pos: poolPlayer.pos,
-      price: poolPlayer.price,
-      start: wasStarting,
-      inGW: tGW,
-      outGW: null,
-      history: []
-    });
+    /* incoming player may already have a row from an earlier stint —
+       reactivate it instead of pushing a duplicate row for the same id */
+    const existing = this.playerById(poolPlayer.id);
+    if(existing){
+      existing.outGW = null;
+      existing.start = wasStarting;
+      existing.inGW  = tGW;
+      existing.price = poolPlayer.price;
+    }else{
+      this.squad.push({
+        id: poolPlayer.id,
+        name: poolPlayer.name,
+        team: poolPlayer.team,
+        teamId: poolPlayer.teamId,
+        pos: poolPlayer.pos,
+        price: poolPlayer.price,
+        start: wasStarting,
+        inGW: tGW,
+        outGW: null,
+        history: []
+      });
+    }
 
     /* if the outgoing player was carrying the current armband, drop it */
     const cw = this.currentGW;
@@ -843,6 +899,7 @@ export const Store = {
     this.captains    = (s.captains    && typeof s.captains    === 'object') ? s.captains    : {};
     this.vices       = (s.vices       && typeof s.vices       === 'object') ? s.vices       : {};
     this.lineups     = (s.lineups     && typeof s.lineups     === 'object') ? s.lineups     : {};
+    this.dedupeSquad();
     this.lastKnownGW = Number.isFinite(s.lastKnownGW) ? s.lastKnownGW : this.lastKnownGW;
     this.managerId   = Number.isFinite(s.managerId) ? s.managerId : this.managerId;
     this.entryMeta   = (s.entryMeta   && typeof s.entryMeta   === 'object') ? s.entryMeta   : this.entryMeta;
@@ -1136,6 +1193,7 @@ export const Store = {
       });
     }
 
+    this.dedupeSquad();
     save(CONFIG.STORE.squad, this.squad);
     this.persistLineups();
     this.persistCaps();
@@ -1172,5 +1230,8 @@ export const Store = {
     emit('reset');
   }
 };
+
+/* one-time cleanup of whatever loaded from localStorage on boot */
+Store.dedupeSquad();
 
 export default Store;
