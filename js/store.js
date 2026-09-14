@@ -757,7 +757,23 @@ export const Store = {
      Called on every mutation for currentGW, so lineups[currentGW]
      always mirrors "today's squad" — the moment currentGW advances,
      that snapshot IS the frozen record for the week that just ended. */
+  /* Has this gameweek actually been played? Two independent signals, so
+     this still works offline and for an unlinked squad: official per-GW
+     totals if we have them, otherwise any player carrying history for
+     that week. Either means the week is over and its record is final. */
+  hasBeenPlayed(gw){
+    if(this.gwHistory?.[gw]) return true;
+    return this.squad.some(p => (p.history || []).some(h => h.gw === gw));
+  },
+
   snapshotLineup(gw){
+    /* Defence in depth. editableGW() normally keeps us off a finished
+       week, but it needs deadline data — and a cached or offline boot
+       has none, which is exactly how a played gameweek got overwritten
+       with the following week's XI. A week that has already been scored
+       is history: never re-snapshot it. */
+    if(this.lineups[gw] && this.hasBeenPlayed(gw)) return;
+
     const active = this.activeSquad();
     this.lineups[gw] = {
       memberIds : active.map(p => p.id),

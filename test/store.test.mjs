@@ -141,4 +141,44 @@ Store.setCaptain(202);
 assert.equal(Store.captains[5], 202, 'captain set with no gw targets the editable gameweek');
 assert.equal(Store.captains[4], undefined, 'and never the finished one');
 
-console.log('ok — 37 assertions passed');
+/* --- A played gameweek is never re-snapshotted, even with no deadlines -
+   The belt to editableGW()'s braces: a cached or offline boot has no
+   deadline map, so editableGW() falls back to currentGW and would aim
+   straight at the finished week. This is what actually corrupted GW4. */
+Store.deadlines = {};                 // the dangerous case
+Store.currentGW = 4;
+Store.captains = {}; Store.vices = {};
+/* the working XI must DIFFER from the stored snapshot, or an overwrite
+   would be invisible and the test would pass without the guard */
+Store.squad = [
+  { id: 301, teamId: 1, pos: 'GK',  price: 4.5, outGW: null, start: true,
+    history: [{ gw: 4, points: 6 }] },                       // GW4 was played
+  { id: 302, teamId: 2, pos: 'DEF', price: 4.5, outGW: null, start: false, history: [] },
+  { id: 303, teamId: 3, pos: 'DEF', price: 4.5, outGW: null, start: true,  history: [] },
+];
+Store.gwHistory = {};
+/* GW4 was fielded with 302; today's XI has 303 instead — the exact
+   shape of the real bug (Konsa/Botman replaced by Egan/Davis) */
+Store.lineups = { 4: { memberIds: [301, 302], starterIds: [301, 302] } };
+
+assert.equal(Store.editableGW(), 4, 'no deadlines -> aims at the finished week');
+assert.equal(Store.hasBeenPlayed(4), true, 'player history proves GW4 was played');
+Store.persistSquad();
+assert.deepEqual(Store.lineups[4].starterIds, [301, 302],
+  'a played gameweek survives even when editableGW() points at it');
+
+/* the official totals are the other signal, for a squad with no history */
+Store.squad.forEach(p => p.history = []);
+Store.gwHistory = { 4: { points: 54 } };
+assert.equal(Store.hasBeenPlayed(4), true, 'gwHistory alone is enough');
+Store.persistSquad();
+assert.deepEqual(Store.lineups[4].starterIds, [301, 302], 'still protected');
+
+/* an unplayed week is still writable, or planning would be impossible */
+Store.gwHistory = {};
+assert.equal(Store.hasBeenPlayed(6), false);
+Store.currentGW = 6;
+Store.persistSquad();
+assert.deepEqual(Store.lineups[6].starterIds, [301, 303], 'a future week snapshots normally');
+
+console.log('ok — 45 assertions passed');
