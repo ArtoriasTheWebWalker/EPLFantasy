@@ -409,8 +409,11 @@ const Draft = {
     const pool = Store.pool.find(p=>p.id===c.id);
     const g    = pool ? Store.gradePool(pool) : { grade:null, pts:0 };
 
-    const lastGW  = Math.max(1, Store.currentGW - 1);
-    const lastPts = pool?.lastGWPoints ?? null;
+    /* bootstrap's event_points is the CURRENT gameweek, so label it that
+       way — the old code read a lastGWPoints field nothing ever set and
+       labelled it GW-1, so this stat always rendered "—". */
+    const lastGW  = Store.currentGW;
+    const lastPts = pool?.gwPoints ?? null;
     const seasonAvg = pool && Store.currentGW > 1
       ? (pool.total / Math.max(1, Store.currentGW - 1)).toFixed(1)
       : '—';

@@ -26,6 +26,18 @@ function emit(what){
   window.dispatchEvent(new CustomEvent('store:change', { detail:{ what } }));
 }
 
+/* Was this FPL pick in the starting XI?
+
+   Read `position`, never `multiplier`. FPL's multiplier means "how much
+   does he score", not "is he on the pitch": it's 0 for an unused bench
+   player, but Bench Boost pays the bench, so in a BB week all 15 picks
+   come back with multiplier >= 1. Filtering on that put all 15 players
+   on the field (seen in GW1, a Bench Boost week). `position` is always
+   1-15 with 1-11 the XI and 12-15 the bench order, whatever chip is on. */
+export function isStartingPick(pick){
+  return pick.position <= CONFIG.SQUAD.STARTERS;
+}
+
 /* =====================================================
    STATE
 
@@ -416,6 +428,13 @@ export const Store = {
     emit('chips');
   },
 
+  /* What the captain's points get multiplied by in this GW: ×3 under
+     Triple Captain, ×2 otherwise. Everything that doubles a captain —
+     the team total, the pitch stripe, the modal breakdown, the captain
+     table — must go through here, or the screens disagree with each
+     other in a TC week. */
+  capMultFor(gw){ return this.chipOf(gw) === '3xc' ? 3 : 2; },
+
   /* =================================================
      SCORING — the correct team total for one GW.
      starters + captain doubling (or ×3 with Triple
@@ -436,7 +455,7 @@ export const Store = {
     const starters = this.startersForGW(gw);
     const eff      = this.effectiveCaptain(gw);
     const chip     = this.chipOf(gw);
-    const capMult  = chip === '3xc' ? 3 : 2;
+    const capMult  = this.capMultFor(gw);
 
     let total = 0;
     for(const p of starters){
@@ -1100,7 +1119,7 @@ export const Store = {
 
       this.lineups[gw] = {
         memberIds : p.picks.map(x => x.element),
-        starterIds: p.picks.filter(x => x.multiplier > 0).map(x => x.element),
+        starterIds: p.picks.filter(isStartingPick).map(x => x.element),
       };
       const cap  = p.picks.find(x => x.isCaptain);
       const vice = p.picks.find(x => x.isVice);
@@ -1152,7 +1171,7 @@ export const Store = {
       const currentIds = new Set(currentPicks.picks.map(x => x.element));
       const currentStartFlag = id => {
         const pick = currentPicks.picks.find(x => x.element === id);
-        return pick ? pick.multiplier > 0 : false;
+        return pick ? isStartingPick(pick) : false;
       };
 
       /* Rebuild Store.squad from the union. Keep existing entries so

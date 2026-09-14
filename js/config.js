@@ -49,7 +49,7 @@ export const CONFIG = {
     entryMeta : 'fpl2627_entry_meta',      // { teamName, rank, ... }
     chips     : 'fpl2627_chips',           // { [gw]: '3xc'|'bboost'|'wildcard'|'freehit' }
     gwHistory : 'fpl2627_gw_history',      // { [gw]: {points, transferCost, ...} } from FPL entryHistory
-    bootstrap : 'fpl2627_bootstrap_cache',
+    bootstrap : 'fpl2627_bootstrap_cache_v2',   // _v2: player shape gained gwPoints
     settings  : 'fpl2627_settings'
   },
 

@@ -82,6 +82,7 @@ export const API = {
         team    : teamById[e.team]?.short || '???',
         price   : e.now_cost / 10,
         total   : e.total_points,
+        gwPoints: e.event_points ?? null,   // his points in the CURRENT gameweek
         form    : parseFloat(e.form) || 0,
         ppg     : parseFloat(e.points_per_game) || 0,
         selected: parseFloat(e.selected_by_percent) || 0,
@@ -264,7 +265,11 @@ export const API = {
         picks: (raw.picks || []).map(p => ({
           element    : p.element,
           position   : p.position,
-          multiplier : p.multiplier,   // 0 bench, 1 XI, 2 captain, 3 triple-captain chip
+          /* how much he SCORES, not whether he played: 0 bench, 1 playing,
+             2 captain, 3 triple captain — but Bench Boost pays the bench,
+             so all 15 come back >= 1 that week. Use `position` (1-11 = XI)
+             to decide the lineup; see isStartingPick in store.js. */
+          multiplier : p.multiplier,
           isCaptain  : !!p.is_captain,
           isVice     : !!p.is_vice_captain
         }))

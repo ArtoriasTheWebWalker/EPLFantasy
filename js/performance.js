@@ -176,7 +176,8 @@ const Performance = {
 
   /* one chip. Captain / vice come from the map keyed on the viewed GW
      (or currentGW in season mode). The effective captain of the viewed
-     GW gets his points doubled with a ×2 badge on the stripe. */
+     GW gets his points multiplied, with a ×2 (or ×3 under Triple
+     Captain) badge on the stripe. */
   playerChip(p){
     const g = Store.seasonMode ? Store.gradeSeason(p) : Store.gradeGW(p, Store.viewGW);
     const pts = g.pts;
@@ -187,16 +188,17 @@ const Performance = {
     const isCap  = capId  != null && p.id === capId;
     const isVice = viceId != null && p.id === viceId;
 
+    const capMult = Store.capMultFor(Store.viewGW);
     let doubledPts = null;
     if(!Store.seasonMode && pts !== null){
       const eff = Store.effectiveCaptain(Store.viewGW).player;
-      if(eff && eff.id === p.id) doubledPts = pts * 2;
+      if(eff && eff.id === p.id) doubledPts = pts * capMult;
     }
 
     const stripeText = pts === null
       ? '—'
       : (doubledPts !== null
-          ? `${doubledPts} <small>PTS · ×2</small>`
+          ? `${doubledPts} <small>PTS · ×${capMult}</small>`
           : `${pts} <small>PTS</small>`);
 
     const chip = chipEl(p, {
@@ -538,8 +540,9 @@ const Performance = {
 
     const eff = Store.effectiveCaptain(Store.viewGW);
     const isEffCap = eff.player && eff.player.id === p.id;
+    const capMult  = Store.capMultFor(Store.viewGW);
     const capTag = isEffCap
-      ? `<span class="m-grade" style="--grade:var(--lime);margin-left:6px">Captain ×2${eff.fallback?' · via vice':''}</span>`
+      ? `<span class="m-grade" style="--grade:var(--lime);margin-left:6px">Captain ×${capMult}${eff.fallback?' · via vice':''}</span>`
       : '';
 
     const past     = this.isPastGW();
@@ -564,7 +567,7 @@ const Performance = {
 
       ${spark ? `<div class="m-sec"><h4>Season form — last ${p.history.length} weeks</h4>${spark}</div>` : ''}
 
-      ${h ? `<div class="m-sec"><h4>Points breakdown</h4>${breakdown}${isEffCap && h.points!=null ? `<div class="break-row total" style="border-top:none"><span>Captain ×2</span><span>${h.points*2}</span></div>` : ''}</div>`
+      ${h ? `<div class="m-sec"><h4>Points breakdown</h4>${breakdown}${isEffCap && h.points!=null ? `<div class="break-row total" style="border-top:none"><span>Captain ×${capMult}</span><span>${h.points*capMult}</span></div>` : ''}</div>`
           : `<div class="hint-line">No data for GW${Store.viewGW} yet.</div>`}
 
       <div class="m-sec">
@@ -819,13 +822,14 @@ const Performance = {
         .map(p=>({ p, pts: Store.pointsIn(p, gw) ?? 0 }))
         .sort((a,b)=>b.pts-a.pts)[0];
       const capPts = capP ? (Store.pointsIn(capP, gw) ?? 0) : 0;
+      const capMult = Store.capMultFor(gw);
       const right  = capP && best && capP.id === best.p.id;
       if(capP){ counted++; if(right) hits++; }
 
       return `<tr>
         <td class="num">GW${gw}</td>
         <td>${capP ? capP.name : '—'}${eff.fallback ? ' <span class="vtag">via vice</span>' : ''}</td>
-        <td class="num">${capPts*2}</td>
+        <td class="num">${capPts*capMult}${capMult !== 2 ? ` <span class="vtag">×${capMult}</span>` : ''}</td>
         <td>${best ? `${best.p.name} (${best.pts})` : '—'}</td>
         <td style="color:var(--${right?'lime':'amber'})">${capP ? (right?'Right call':'Missed') : '—'}</td>
       </tr>`;
@@ -834,7 +838,7 @@ const Performance = {
     const rate = counted ? Math.round(hits/counted*100) : 0;
 
     el.innerHTML = `<table class="tbl">
-      <thead><tr><th>GW</th><th>Captain</th><th>Pts ×2</th><th>Best in squad</th><th>Verdict</th></tr></thead>
+      <thead><tr><th>GW</th><th>Captain</th><th>Captain pts</th><th>Best in squad</th><th>Verdict</th></tr></thead>
       <tbody>${rows}</tbody></table>
       <div class="cap-rate">Right call in <b>${hits}/${counted}</b> weeks · <b>${rate}%</b></div>`;
   },
