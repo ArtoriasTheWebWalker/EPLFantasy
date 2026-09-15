@@ -148,12 +148,21 @@ const TablePage = {
       this.gwView = gws.includes(Store.currentGW) ? Store.currentGW : gws[0];
     }
 
-    pillRow.innerHTML = gws.map(gw=>
-      `<button class="gw${gw===this.gwView?' active':''}" data-gw="${gw}">GW${gw}</button>`
-    ).join('');
+    pillRow.innerHTML = '<button class="gw-step" id="fxGwPrev" aria-label="Previous gameweek">&lsaquo;</button>'
+      + gws.map(gw=>`<button class="gw${gw===this.gwView?' active':''}" data-gw="${gw}">GW${gw}</button>`).join('')
+      + '<button class="gw-step" id="fxGwNext" aria-label="Next gameweek">&rsaquo;</button>';
+
     pillRow.querySelectorAll('[data-gw]').forEach(b=>{
       b.onclick = () => { this.gwView = +b.dataset.gw; this.renderByGW(); };
     });
+    document.getElementById('fxGwPrev').onclick = () => {
+      const i = gws.indexOf(this.gwView);
+      if(i > 0){ this.gwView = gws[i-1]; this.renderByGW(); }
+    };
+    document.getElementById('fxGwNext').onclick = () => {
+      const i = gws.indexOf(this.gwView);
+      if(i >= 0 && i < gws.length-1){ this.gwView = gws[i+1]; this.renderByGW(); }
+    };
 
     const matches = Store.fixtures
       .filter(f=>f.gw === this.gwView)

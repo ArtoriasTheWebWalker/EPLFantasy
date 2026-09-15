@@ -159,6 +159,11 @@ export const Store = {
   viewGW    : 1,
   seasonMode: false,
 
+  /* true from the moment boot() starts until the first API round-trip
+     finishes. Pages use it to show a loading skeleton instead of an
+     empty pitch on a fresh device with no local squad yet. */
+  booting   : false,
+
   /* =================================================
      SQUAD
 
@@ -1173,6 +1178,33 @@ export const Store = {
 
   tierMeta(tier){
     return CONFIG.TIER_BANDS.find(b=>b.tier===tier) || CONFIG.TIER_BANDS[2];
+  },
+
+  /* =================================================
+     MOOD — the grade colour of the most recently played
+     gameweek's XI, used to tint the app's ambient
+     background. Purely cosmetic; never affects logic.
+  ================================================= */
+  lastGWMoodColor(){
+    const weeks = new Set();
+    this.squad.forEach(p=>(p.history||[]).forEach(h=>weeks.add(h.gw)));
+    const played = [...weeks].sort((a,b)=>a-b);
+    if(!played.length) return null;
+
+    const gw = played.at(-1);
+    const starters = this.startersForGW(gw);
+    if(!starters.length) return null;
+
+    const ratios = starters
+      .map(p=>this.gradeGW(p, gw).ratio)
+      .filter(Number.isFinite);
+    if(!ratios.length) return null;
+
+    const avg = ratios.reduce((a,b)=>a+b,0) / ratios.length;
+    if(avg >= CONFIG.GRADE_CUTS.blue)  return 'blue';
+    if(avg >= CONFIG.GRADE_CUTS.green) return 'green';
+    if(avg >= CONFIG.GRADE_CUTS.amber) return 'amber';
+    return 'red';
   },
 
   /* next N fixtures for a team, with difficulty */

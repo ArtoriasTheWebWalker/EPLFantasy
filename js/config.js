@@ -49,7 +49,8 @@ export const CONFIG = {
     entryMeta : 'fpl2627_entry_meta',      // { teamName, rank, ... }
     chips     : 'fpl2627_chips',           // { [gw]: '3xc'|'bboost'|'wildcard'|'freehit' }
     gwHistory : 'fpl2627_gw_history',      // { [gw]: {points, transferCost, ...} } from FPL entryHistory
-    bootstrap : 'fpl2627_bootstrap_cache_v3',   // _v3: boot payload gained per-GW deadlines
+    bootstrap : 'fpl2627_bootstrap_cache_v4',   // _v4: boot payload gained price-change projections
+    lastPage  : 'fpl2627_last_page',       // which top-level tab was open last (Performance/Draft/Table)
     settings  : 'fpl2627_settings'
   },
 

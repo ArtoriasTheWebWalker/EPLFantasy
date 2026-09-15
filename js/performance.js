@@ -18,7 +18,7 @@
 
 import { CONFIG } from './config.js';
 import { Store }  from './store.js';
-import { Modal, chipEl, apiBanner, emptyNote, wireSlideNav } from './ui.js';
+import { Modal, chipEl, apiBanner, emptyNote, wireSlideNav, animateNumber } from './ui.js';
 
 /* concrete grade colours (kept in sync with css :root) — used where an
    inline SVG needs a real colour value rather than a CSS variable */
@@ -56,13 +56,14 @@ const Performance = {
   renderGWRow(){
     const row = document.getElementById('gwRow');
     const upTo = Store.currentGW;
-    let html = '';
+    let html = '<button class="gw-step" id="gwPrev" aria-label="Previous gameweek">&lsaquo;</button>';
 
     for(let gw=1; gw<=upTo; gw++){
       const active = !Store.seasonMode && Store.viewGW === gw;
       html += `<button class="gw${active?' active':''}" data-gw="${gw}">GW${gw}</button>`;
     }
     html += `<button class="gw season-btn${Store.seasonMode?' active':''}" data-season="1">Season</button>`;
+    html += '<button class="gw-step" id="gwNext" aria-label="Next gameweek">&rsaquo;</button>';
     row.innerHTML = html;
 
     row.querySelectorAll('[data-gw]').forEach(b=>{
@@ -71,6 +72,22 @@ const Performance = {
     row.querySelector('[data-season]').onclick = () => {
       Store.seasonMode = true; this.render();
     };
+
+    /* prev/next — the long list of week pills is fine early season and
+       a scroll-forever list by GW25+, so this is the fast path once
+       you already know roughly which week you want */
+    document.getElementById('gwPrev').onclick = () => {
+      const from = Store.seasonMode ? upTo : Store.viewGW;
+      Store.seasonMode = false;
+      Store.viewGW = Math.max(1, from - 1);
+      this.render();
+    };
+    document.getElementById('gwNext').onclick = () => {
+      const from = Store.seasonMode ? upTo : Store.viewGW;
+      Store.seasonMode = false;
+      Store.viewGW = Math.min(upTo, from + 1);
+      this.render();
+    };
   },
 
   /* -------------------------------------------------
@@ -78,9 +95,22 @@ const Performance = {
      read frozen snapshots from Store.lineups[gw]; the
      live one reads the working squad set on Draft.
   ------------------------------------------------- */
+  /* shimmering placeholder shirts, shown only on a fresh device before
+     boot() has resolved and there's no local squad yet to paint instead */
+  skeletonPitch(){
+    const pitch = document.getElementById('pitchArea');
+    const bench = document.getElementById('benchArea');
+    const row = n => `<div class="p-row">${'<div class="skel-chip"></div>'.repeat(n)}</div>`;
+    pitch.innerHTML = '<div class="goalmouth"></div>' + row(1) + row(4) + row(4) + row(2);
+    bench.innerHTML = '<div class="skel-chip"></div>'.repeat(4);
+  },
+
   renderPitch(){
     const pitch = document.getElementById('pitchArea');
     const bench = document.getElementById('benchArea');
+
+    if(Store.booting && !Store.activeSquad().length){ this.skeletonPitch(); return; }
+
     pitch.innerHTML = '<div class="goalmouth"></div>';
     bench.innerHTML = '';
 
@@ -206,10 +236,20 @@ const Performance = {
      hero stat bar — GW points doubles for the effective
      captain of the viewed GW (0-min captain → vice).
   ------------------------------------------------- */
+  skeletonHero(){
+    const el = document.getElementById('heroStats');
+    el.innerHTML = Array.from({length:3}).map(()=>`
+      <div class="hero-tile a-lime skel">
+        <div class="ht-label skel-line" style="width:60%"></div>
+        <div class="ht-val skel-line" style="width:80%;height:26px;margin-top:9px"></div>
+      </div>`).join('');
+  },
+
   renderHero(){
     const el = document.getElementById('heroStats');
     if(!el) return;
 
+    if(Store.booting && !Store.activeSquad().length){ this.skeletonHero(); return; }
     if(!Store.activeSquad().length){ el.innerHTML = ''; return; }
 
     /* real team score — starters + captain doubling + Bench Boost /
@@ -223,27 +263,33 @@ const Performance = {
 
     const gwLabel = `GW${Store.viewGW} points${chipLabel ? ` · ${chipLabel}` : ''}`;
     const third = Store.seasonMode
-      ? ['Points / week', weeks ? (seasonPts/weeks).toFixed(1) : '—', 'violet']
-      : [gwLabel, gwPts, 'violet'];
+      ? { label:'Points / week', raw: weeks ? seasonPts/weeks : null, decimals:1, accent:'violet' }
+      : { label:gwLabel, raw: gwPts, decimals:0, accent:'violet' };
 
     /* if the FPL account is linked, prefer live overall rank in the
        second slot; Squad value falls off. Otherwise keep Squad value. */
     const rank = Store.entryMeta?.rank;
     const second = rank
-      ? ['Overall rank', rank.toLocaleString(), 'cyan']
-      : ['Squad value', '£' + value.toFixed(1) + 'm', 'cyan'];
+      ? { label:'Overall rank', raw:rank, decimals:0, accent:'cyan' }
+      : { label:'Squad value', raw:value, decimals:1, prefix:'£', suffix:'m', accent:'cyan' };
 
     const tiles = [
-      ['Season points', seasonPts, 'lime'],
+      { label:'Season points', raw:seasonPts, decimals:0, accent:'lime' },
       second,
       third
     ];
 
-    el.innerHTML = tiles.map(([label,val,accent])=>`
-      <div class="hero-tile a-${accent}">
-        <div class="ht-label">${label}</div>
-        <div class="ht-val">${val}</div>
+    el.innerHTML = tiles.map((t,i)=>`
+      <div class="hero-tile a-${t.accent}">
+        <div class="ht-label">${t.label}</div>
+        <div class="ht-val" id="htv-${i}">${t.raw == null ? '—' : ''}</div>
       </div>`).join('');
+
+    tiles.forEach((t,i)=>{
+      if(t.raw == null) return;   // already painted the em-dash above
+      animateNumber(document.getElementById(`htv-${i}`), t.raw,
+        { decimals:t.decimals, prefix:t.prefix||'', suffix:t.suffix||'' });
+    });
   },
 
   /* -------------------------------------------------

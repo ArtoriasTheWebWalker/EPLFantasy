@@ -19,7 +19,7 @@
 import { CONFIG } from './config.js';
 import { API }    from './api.js';
 import { Store }  from './store.js';
-import { Modal, chipEl, slotEl, searchBox, apiBanner, fixtureRunHTML, emptyNote, chipSelectHTML, wireSlideNav } from './ui.js';
+import { Modal, chipEl, slotEl, searchBox, apiBanner, fixtureRunHTML, emptyNote, chipSelectHTML, wireSlideNav, toast, confirmDialog } from './ui.js';
 
 const FLAGS = [
   { key:'hold',  label:'Hold'  },
@@ -28,6 +28,11 @@ const FLAGS = [
 ];
 
 const Draft = {
+
+  /* id of a player who was just made captain — boardChip() gives him a
+     one-shot glow, then this clears so it doesn't repeat on the next
+     unrelated re-render */
+  _burstPid: null,
 
   mount(){ wireSlideNav('#page-draft'); },
 
@@ -64,7 +69,7 @@ const Draft = {
     document.getElementById('chipSel').onchange = e => {
       const r = Store.setChip(gw, e.target.value);
       if(!r.ok){
-        alert(r.reason);
+        toast(r.reason, 'error');
         e.target.value = Store.chipOf(gw) || '';
         return;
       }
@@ -135,6 +140,11 @@ const Draft = {
       meta   : `${p.team} · ${g.pts||0} pts`
       /* no onClick here — makeInteractive tells a tap from a drag */
     });
+
+    if(this._burstPid === p.id){
+      el.classList.add('cap-burst');
+      this._burstPid = null;   // one-shot — spend it now that it's applied
+    }
 
     /* swap the points stripe for the flag stripe */
     const stripe = document.createElement('div');
@@ -211,7 +221,7 @@ const Draft = {
       if(drop){
         const otherId = +drop.dataset.pid;
         const r = Store.swapLineup(p.id, otherId);
-        if(!r.ok && r.reason) alert(r.reason);
+        if(!r.ok && r.reason) toast(r.reason, 'error');
         this.render();
       }
     };
@@ -251,7 +261,7 @@ const Draft = {
       exclude: Store.activeSquad().map(p=>p.id),
       onPick: player => {
         const res = Store.addPlayer(player);
-        if(!res.ok){ alert(res.reason); return; }
+        if(!res.ok){ toast(res.reason, 'error'); return; }
         this.backfill(player.id);
         Modal.close();
         this.render();
@@ -326,6 +336,7 @@ const Draft = {
     /* wire actions */
     document.getElementById('btnCap').onclick = () => {
       Store.setCaptain(p.id);
+      this._burstPid = p.id;   // one-shot glow on his shirt next render
       Modal.close();
       this.render();
     };
@@ -336,13 +347,14 @@ const Draft = {
     };
     document.getElementById('btnStart').onclick = () => {
       const r = Store.toggleStart(p.id);
-      if(!r.ok){ alert(r.reason); return; }
+      if(!r.ok){ toast(r.reason, 'error'); return; }
       Modal.close();
       this.render();
     };
-    document.getElementById('btnRemove').onclick = () => {
-      if(!confirm(`Remove ${p.name} from your squad?`)) return;
-      Store.removePlayer(p.id);
+    document.getElementById('btnRemove').onclick = async () => {
+      const ok = await confirmDialog('Remove player?', `Remove ${p.name} from your squad?`, 'Remove');
+      if(!ok){ this.openPlayer(p); return; }   // back to his card, not a closed modal
+      this.removeWithUndo(p);
       Modal.close();
       this.render();
     };
@@ -365,6 +377,39 @@ const Draft = {
     });
   },
 
+  /* Remove a player, but keep everything Store.removePlayer touched so
+     an "Undo" toast can put it all back exactly. removePlayer takes one
+     of two paths depending on whether the player is locked into a past
+     snapshot — soft (outGW set, row kept) or hard (row dropped outright)
+     — so recovery checks which one actually happened rather than
+     assuming either. */
+  removeWithUndo(p){
+    const before   = JSON.parse(JSON.stringify(p));
+    const prevNote = Store.draft[p.id] ? { ...Store.draft[p.id] } : null;
+    const cw       = Store.editableGW();
+    const wasCap   = Store.captains[cw] === p.id;
+    const wasVice  = Store.vices[cw]    === p.id;
+
+    Store.removePlayer(p.id);
+
+    toast(`${p.name} removed`, 'info', {
+      actionLabel: 'Undo',
+      onAction: () => {
+        const row = Store.squad.find(x=>x.id===p.id);
+        if(row){ row.outGW = before.outGW; row.start = before.start; }   // soft-remove path
+        else    { Store.squad.push(before); }                            // hard-delete path
+
+        if(prevNote) Store.draft[p.id] = prevNote;
+        if(wasCap)  Store.captains[cw] = p.id;
+        if(wasVice) Store.vices[cw]    = p.id;
+
+        Store.persistSquad();
+        Store.persistDraft();
+        Store.persistCaps();
+      }
+    });
+  },
+
   openSwap(p){
     const panel = document.getElementById('swapPanel');
     if(panel.dataset.open === '1'){ panel.innerHTML=''; panel.dataset.open='0'; return; }
@@ -375,7 +420,7 @@ const Draft = {
       placeholder: `Replace ${p.name} with…`,
       onPick: player => {
         const res = Store.transfer(p.id, player, Store.editableGW());
-        if(!res.ok){ alert(res.reason); return; }
+        if(!res.ok){ toast(res.reason, 'error'); return; }
         this.backfill(player.id);
         Modal.close();
         this.render();
@@ -441,12 +486,15 @@ const Draft = {
     card.style.setProperty('--cg', g.grade ? `var(--${g.grade})` : 'var(--line-strong)');
 
     const mySquadSamePos = Store.squad.filter(p=>p.pos===c.pos);
+    const move = this.priceMoveTonight(pool);
 
     card.innerHTML = `
       <div class="cand-top">
         <div>
           <div class="cand-name">${c.name}</div>
-          <div class="cand-sub">${c.team} · ${c.pos} · £${c.price.toFixed(1)}m</div>
+          <div class="cand-sub">${c.team} · ${c.pos} · £${c.price.toFixed(1)}m
+            ${move ? `<span class="price-move ${move}">${move==='up' ? '▲ rising tonight' : '▼ falling tonight'}</span>` : ''}
+          </div>
         </div>
         <button class="cand-x" title="Remove from shortlist">✕</button>
       </div>
@@ -480,8 +528,9 @@ const Draft = {
         <textarea class="note-box" placeholder="Why him — form, fixtures, price, when you'd pull the trigger…">${c.note||''}</textarea>
       </details>`;
 
-    card.querySelector('.cand-x').onclick = () => {
-      if(confirm(`Remove ${c.name} from your shortlist?`)) Store.removeCandidate(c.id);
+    card.querySelector('.cand-x').onclick = async () => {
+      const ok = await confirmDialog('Remove from shortlist?', `Remove ${c.name} from your shortlist?`, 'Remove');
+      if(ok) Store.removeCandidate(c.id);
     };
     card.querySelector('.sel-swap').onchange = e =>
       Store.updateCandidate(c.id, { swapWith: e.target.value ? +e.target.value : null });
@@ -497,6 +546,16 @@ const Draft = {
     return card;
   },
 
+  /* Verified against a real price change: everything that moved sat
+     >=100%, the highest that didn't was 100.3% — so the threshold is
+     exact, not a rough cutoff. offset 0 is tonight; anything further
+     out is too likely to shift before it matters to flag here. */
+  priceMoveTonight(pool){
+    const p0 = pool?.priceChange?.find(x => x.offset === 0);
+    if(!p0 || !Number.isFinite(p0.percent) || Math.abs(p0.percent) < 100) return null;
+    return p0.percent > 0 ? 'up' : 'down';
+  },
+
   openAddCandidate(pos){
     const sb = searchBox({
       pos,
@@ -504,7 +563,7 @@ const Draft = {
       placeholder: `Add a ${CONFIG.POS_LABEL[pos].replace(/s$/,'').toLowerCase()} to watch…`,
       onPick: player => {
         const res = Store.addCandidate(player);
-        if(!res.ok){ alert(res.reason); return; }
+        if(!res.ok){ toast(res.reason, 'error'); return; }
         Modal.close();
       }
     });

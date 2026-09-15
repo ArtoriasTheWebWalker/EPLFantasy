@@ -16,6 +16,25 @@ import { Sync }   from './sync.js';
 const PAGES = ['performance','draft','table'];
 const loaded = {};
 
+/* ---------- small concurrency-limited map ----------
+   await Promise.all(items.map(fn)) fires every request at once, which
+   is what the boot sequence used to do one at a time in a plain loop
+   instead — 15-35 sequential round trips through the proxy by
+   mid-season. This runs a bounded number of workers in parallel
+   instead of either extreme: fast, without hammering the Worker. */
+async function mapLimit(items, limit, fn){
+  const results = new Array(items.length);
+  let i = 0;
+  async function worker(){
+    while(i < items.length){
+      const idx = i++;
+      results[idx] = await fn(items[idx], idx);
+    }
+  }
+  await Promise.all(Array.from({ length: Math.min(limit, items.length) }, worker));
+  return results;
+}
+
 /* ---------- load a page fragment + its module ---------- */
 
 async function mountPage(name){
@@ -39,16 +58,89 @@ async function mountPage(name){
 
 /* ---------- tabs ---------- */
 
+function activatePage(name){
+  /* there are now two navs sharing the same data-page values — the
+     header tabs (desktop) and the fixed bottom bar (phone) — so every
+     button for this page needs the active class, not just whichever
+     one was clicked. */
+  document.querySelectorAll('.tab').forEach(t=>t.classList.toggle('active', t.dataset.page === name));
+  document.querySelectorAll('.page').forEach(p=>p.classList.remove('active'));
+  document.getElementById(`page-${name}`).classList.add('active');
+}
+
 function initTabs(){
   document.querySelectorAll('.tab').forEach(tab=>{
     tab.onclick = () => {
-      document.querySelectorAll('.tab').forEach(t=>t.classList.remove('active'));
-      tab.classList.add('active');
-      document.querySelectorAll('.page').forEach(p=>p.classList.remove('active'));
-      document.getElementById(`page-${tab.dataset.page}`).classList.add('active');
+      activatePage(tab.dataset.page);
+      try{ localStorage.setItem(CONFIG.STORE.lastPage, tab.dataset.page); }catch{}
       window.scrollTo({ top:0 });
       mountPage(tab.dataset.page);
     };
+  });
+}
+
+/* ---------- header, frosted on scroll ---------- */
+
+function initHeaderScroll(){
+  const header = document.querySelector('header');
+  if(!header) return;
+  let ticking = false;
+  const apply = () => { header.classList.toggle('scrolled', window.scrollY > 6); ticking = false; };
+  window.addEventListener('scroll', () => {
+    if(ticking) return;
+    ticking = true;
+    requestAnimationFrame(apply);
+  }, { passive:true });
+  apply();
+}
+
+/* ---------- deadline countdown ---------- */
+
+function formatCountdown(ms){
+  if(ms <= 0) return 'deadline passed';
+  const mins = Math.floor(ms / 60000);
+  const d = Math.floor(mins / 1440);
+  const h = Math.floor((mins % 1440) / 60);
+  const m = mins % 60;
+  if(d > 0)  return `${d}d ${h}h`;
+  if(h > 0)  return `${h}h ${m}m`;
+  return `${m}m`;
+}
+
+function renderDeadline(){
+  const el = document.getElementById('deadlineChip');
+  if(!el) return;
+
+  const gw = Store.editableGW ? Store.editableGW() : Store.currentGW;
+  const deadline = Store.deadlines?.[gw];
+  if(!deadline){ el.hidden = true; return; }
+
+  const ms = deadline - Date.now();
+  el.hidden = false;
+  el.classList.toggle('soon', ms > 0 && ms < 1000*60*60*24);
+  el.classList.toggle('passed', ms <= 0);
+  el.innerHTML = `<b>GW${gw}</b> ${ms > 0 ? formatCountdown(ms) : 'deadline passed'}`;
+}
+
+/* ---------- ambient mood ----------
+   Tints the background's floodlight orb toward how the most recently
+   played gameweek actually went — purely cosmetic, computed from the
+   same grade colours the pitch already uses. */
+function applyMoodColor(){
+  const map = { blue:'var(--blue)', green:'var(--lime)', amber:'var(--amber)', red:'var(--red)' };
+  const grade = Store.lastGWMoodColor?.();
+  document.documentElement.style.setProperty('--mood', map[grade] || 'var(--lime)');
+}
+
+/* ---------- service worker ----------
+   Caches the static shell (HTML/CSS/JS/icons) for instant repeat loads
+   and basic offline access. Never touches the FPL proxy or the sync
+   worker — those are a different origin and keep their own freshness
+   rules in api.js / sync.js. */
+function initServiceWorker(){
+  if(!('serviceWorker' in navigator)) return;
+  window.addEventListener('load', () => {
+    navigator.serviceWorker.register('./sw.js').catch(()=>{});
   });
 }
 
@@ -85,12 +177,22 @@ function initSync(){
 async function boot(){
   document.getElementById('brandSeason').textContent = CONFIG.SEASON;
 
+  Store.booting = true;
+
   initTabs();
   initModal();
   initSync();
+  initHeaderScroll();
+  initServiceWorker();
+
+  /* reopen on whichever tab was open last, not always Performance */
+  let startPage = 'performance';
+  try{ startPage = localStorage.getItem(CONFIG.STORE.lastPage) || 'performance'; }catch{}
+  if(!PAGES.includes(startPage)) startPage = 'performance';
+  activatePage(startPage);
 
   /* first paint immediately, so the UI never waits on the network */
-  await mountPage('performance');
+  await mountPage(startPage);
 
   /* pull the cloud copy (if sync is on) and reconcile before we
      backfill history, so the API works against the right squad */
@@ -133,23 +235,32 @@ async function boot(){
       Store.table    = API.leagueTable(boot.teams, fx);
     }
 
-    /* position averages for every finished gameweek —
-       needed to grade anyone, so it runs once up front */
-    for(let gw=1; gw<=boot.finishedGW; gw++){
-      const live = await API.liveGW(gw);
+    /* Position averages for every finished gameweek — needed to grade
+       anyone. Used to be a plain sequential loop (one round trip at a
+       time through the proxy); now runs up to 6 at once. A finished
+       week's stats never change, so liveGW caches those permanently —
+       only the truly in-progress gameweek (if any) re-fetches. */
+    const finishedGWs = Array.from({ length: boot.finishedGW }, (_,i)=>i+1);
+    await mapLimit(finishedGWs, 6, async gw=>{
+      const live = await API.liveGW(gw, /* finished */ true);
       if(live) Store.posAvg[gw] = API.positionAverages(boot.players, live);
-    }
+    });
 
-    /* backfill history for every squad member */
-    for(const p of Store.squad){
+    /* backfill history for every squad member, same treatment */
+    await mapLimit(Store.squad, 6, async p=>{
       const hist = await API.playerHistory(p.id);
       if(hist) p.history = hist;
-    }
+    });
     Store.persistSquad();
   }
 
   Store.apiState = API.online ? 'ok' : 'offline';
   Store.lastError = API.lastError;
+  Store.booting = false;
+
+  applyMoodColor();
+  renderDeadline();
+  setInterval(renderDeadline, 60000);
 
   /* re-render whatever page is showing */
   const active = document.querySelector('.tab.active')?.dataset.page || 'performance';
@@ -171,6 +282,8 @@ function isTyping(){
 function renderActive(){
   const active = document.querySelector('.tab.active')?.dataset.page;
   loaded[active]?.render?.();
+  applyMoodColor();
+  renderDeadline();
 }
 
 window.addEventListener('store:change', () => {

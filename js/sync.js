@@ -17,7 +17,7 @@
 
 import { Store } from './store.js';
 import { API }   from './api.js';
-import { Modal } from './ui.js';
+import { Modal, choice, confirmDialog } from './ui.js';
 
 const SYNC_BASE = 'https://fpl-sync.abdulelah12012.workers.dev';
 const CODE_KEY  = 'fpl2627_sync_code';
@@ -203,8 +203,10 @@ export const Sync = {
     };
 
     const unlink = document.getElementById('fplUnlink');
-    if(unlink) unlink.onclick = () => {
-      if(!confirm('Unlink your FPL account? Existing squad data stays; future boots stop syncing until you link again.')) return;
+    if(unlink) unlink.onclick = async () => {
+      const ok = await confirmDialog('Unlink your FPL account?',
+        'Existing squad data stays; future boots stop syncing until you link again.', 'Unlink');
+      if(!ok){ this.openSettings(); return; }   // back to the sync screen, not a closed modal
       Store.unlinkManager();
       Modal.close();
     };
@@ -222,10 +224,14 @@ export const Sync = {
         const lFilled = hasData(Store.exportState());
 
         if(rFilled && lFilled){
-          const useCloud = confirm(
-            'This code already has a squad saved in the cloud.\n\n' +
-            'OK  → load the cloud squad (replaces this device)\n' +
-            'Cancel → keep this device and overwrite the cloud');
+          const useCloud = await choice({
+            title: 'This code already has a squad saved',
+            body: 'Load the cloud copy onto this device, or keep this device and overwrite the cloud?',
+            options: [
+              { label:'Keep this device', value:false },
+              { label:'Load cloud', value:true, className:'primary' }
+            ]
+          });
           if(useCloud) this.apply(remote, res.updatedAt);
           else         await this.push();
         } else if(rFilled){
@@ -250,8 +256,10 @@ export const Sync = {
     };
 
     const clear = document.getElementById('syncClear');
-    if(clear) clear.onclick = () => {
-      if(!confirm('Turn off sync on this device? Your squad stays here; it just stops sharing.')) return;
+    if(clear) clear.onclick = async () => {
+      const ok = await confirmDialog('Turn off sync on this device?',
+        'Your squad stays here; it just stops sharing.', 'Turn off');
+      if(!ok){ this.openSettings(); return; }
       this.setCode('');
       this.refreshButton();
       Modal.close();

@@ -41,6 +41,20 @@ function writeCache(key, data){
   try{ localStorage.setItem(key, JSON.stringify({ at:Date.now(), data })); }catch{}
 }
 
+/* permanent cache — no TTL. Only safe for data that never changes once
+   written, e.g. a finished gameweek's live stats. Same on-disk shape as
+   the TTL cache so both could share readCache if ever needed. */
+function readCacheForever(key){
+  try{
+    const raw = localStorage.getItem(key);
+    if(!raw) return null;
+    return JSON.parse(raw).data;
+  }catch{ return null; }
+}
+function writeCacheForever(key, data){
+  try{ localStorage.setItem(key, JSON.stringify({ at:Date.now(), data })); }catch{}
+}
+
 /* =====================================================
    PUBLIC API
 ===================================================== */
@@ -87,7 +101,15 @@ export const API = {
         ppg     : parseFloat(e.points_per_game) || 0,
         selected: parseFloat(e.selected_by_percent) || 0,
         status  : e.status,            // a=available, i=injured, d=doubtful
-        news    : e.news || ''
+        news    : e.news || '',
+        /* progress toward tonight's price move, not a probability —
+           verified against real price changes: everything that moved
+           sat >=100%, the highest that didn't was 100.3%. offset 0 is
+           tonight, 1 tomorrow, etc. Kept raw; Store interprets it. */
+        priceChange: (e.price_change_projections || []).map(pc => ({
+          offset : pc.offset,
+          percent: pc.projected_percent
+        }))
       }));
 
       const currentEvent = raw.events.find(ev=>ev.is_current)
@@ -161,10 +183,22 @@ export const API = {
   },
 
   /* -------------------------------------------------
-     liveGW(gw) — every player's points for one GW.
-     Used to compute position averages for grading.
+     liveGW(gw, finished) — every player's points for one
+     GW. Used to compute position averages for grading.
+
+     A finished gameweek's stats never change again, so
+     pass finished:true to cache the result forever instead
+     of the usual 12h TTL — this is what makes a repeat boot
+     late-season fast instead of re-fetching every past week
+     on every open. The gameweek still in progress must never
+     be cached this way, since its stats update live.
   ------------------------------------------------- */
-  async liveGW(gw){
+  async liveGW(gw, finished=false){
+    const cacheKey = `fpl2627_livegw_${gw}`;
+    if(finished){
+      const cached = readCacheForever(cacheKey);
+      if(cached) return cached;
+    }
     try{
       const path = CONFIG.ENDPOINTS.liveGW.replace('{gw}', gw);
       const raw = await getJSON(path);
@@ -176,6 +210,7 @@ export const API = {
           stats  : e.stats
         };
       });
+      if(finished) writeCacheForever(cacheKey, map);
       return map;
     }catch(err){
       this.lastError = err.message;

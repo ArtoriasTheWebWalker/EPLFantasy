@@ -14,6 +14,13 @@
 <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
 <meta name="apple-mobile-web-app-title" content="FPL">
 
+<!-- fonts loaded directly here (not via @import in app.css) so the
+     browser can start fetching them in parallel with the CSS instead
+     of discovering them only after app.css finishes downloading -->
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Archivo+Black&family=Inter:wght@400;500;600;700;800&family=JetBrains+Mono:wght@400;500;600;700&display=swap">
+
 <link rel="stylesheet" href="css/app.css">
 <link rel="stylesheet" href="css/performance.css">
 <link rel="stylesheet" href="css/draft.css">
@@ -24,10 +31,11 @@
 <header>
   <div class="brand">
     <span class="dot"></span><span class="brand-name">FPL Companion</span>
+    <span class="deadline-chip" id="deadlineChip" hidden></span>
     <button class="sync-btn" id="syncBtn" aria-label="Sync across devices" title="Sync across devices">☁</button>
     <span class="season" id="brandSeason">2026/27</span>
   </div>
-  <nav class="tabs">
+  <nav class="tabs header-tabs">
     <button class="tab active" data-page="performance">Performance</button>
     <button class="tab" data-page="draft">Draft</button>
     <button class="tab" data-page="table">Table &amp; fixtures</button>
@@ -41,6 +49,19 @@
   <div class="page" id="page-table"></div>
 </main>
 
+<!-- phone-only fixed nav — same buttons, thumb reach at the bottom
+     instead of the top; app.js keeps both navs' active state in sync -->
+<nav class="tabs bottom-tabs">
+  <button class="tab active" data-page="performance">
+    <span class="tab-ic">▦</span><span>Performance</span>
+  </button>
+  <button class="tab" data-page="draft">
+    <span class="tab-ic">✎</span><span>Draft</span>
+  </button>
+  <button class="tab" data-page="table">
+    <span class="tab-ic">☰</span><span>Table</span>
+  </button>
+</nav>
 
 <!-- shared modal -->
 <div class="overlay" id="overlay" role="dialog" aria-modal="true">
