@@ -181,4 +181,141 @@ Store.currentGW = 6;
 Store.persistSquad();
 assert.deepEqual(Store.lineups[6].starterIds, [301, 303], 'a future week snapshots normally');
 
-console.log('ok — 45 assertions passed');
+/* --- Grading blend: a cheaper player scoring the same rate as a
+   pricier one now grades better, since the plan (see the Grading
+   System note) was three metrics — raw points, points-vs-position-
+   average, and value — folded together instead of ratio alone. -----*/
+{
+  Store.posAvg = { 10: { MID: 4 } };
+  const cheap     = { pos:'MID', price:4.5, history:[{ gw:10, points:6 }] };
+  const expensive = { pos:'MID', price:12,  history:[{ gw:10, points:6 }] };
+
+  const gCheap = Store.gradeGW(cheap, 10);
+  const gExp   = Store.gradeGW(expensive, 10);
+
+  assert.equal(gCheap.ratio, 1.5, 'plain position ratio is unaffected by price');
+  assert.equal(gExp.ratio, 1.5, 'same plain ratio for the pricier player');
+  assert.ok(gCheap.blended > gExp.blended,
+    'the cheaper player grades higher once value is folded in, even at an identical ratio');
+  assert.equal(Store.valueRatioFor(1.5, 6), 1.5, 'a £6m player at ratio 1.5 has an identical value ratio — the reference price');
+}
+
+/* --- Auto-substitution: fills blanks in bench order, formation rules
+   permitting — the correction FPL itself applies that gwPointsFor was
+   not making before. Three things checked at once: the goalkeeper only
+   swaps with the bench goalkeeper, a bench player who also blanked is
+   skipped, and a swap that would break the formation minimum is
+   refused even though a later bench player can still help elsewhere. */
+{
+  const AUTOSUB_GW = 50;
+  const withMin = (id, pos, price, minutes) => ({
+    id, pos, price, teamId: 1, name: `P${id}`, outGW: null, start: false,
+    history: [{ gw: AUTOSUB_GW, points: minutes > 0 ? 3 : 0, minutes }],
+  });
+
+  Store.squad = [
+    withMin(1, 'GK', 4.5, 0),    // starting GK — blanks
+    withMin(2, 'GK', 4.0, 90),   // bench GK — played, should come on
+
+    withMin(3, 'DEF', 5, 0),     // starting DEF — blanks
+    withMin(4, 'DEF', 5, 0),     // starting DEF — also blanks
+    withMin(5, 'DEF', 5, 90),
+    withMin(6, 'DEF', 4.5, 90),  // bench DEF, order 1 — played, covers id 3
+    /* no second bench DEF, so id 4 stays blanked — nobody legal to replace him */
+
+    withMin(11, 'MID', 6, 90),
+    withMin(12, 'MID', 6, 90),
+    withMin(13, 'MID', 6, 0),    // starting MID — blanks
+    withMin(14, 'MID', 6, 90),
+    withMin(15, 'MID', 5.5, 90), // bench MID, order 2 — played, would drop DEF below 3 if used on a DEF gap → only legal for the MID gap
+
+    withMin(21, 'FWD', 7, 90),
+    withMin(22, 'FWD', 7, 90),
+    withMin(23, 'FWD', 7, 90),
+    withMin(24, 'FWD', 5, 0),    // bench FWD, order 0 (first) — also 0 minutes, can't help anyone
+  ];
+
+  Store.lineups = {
+    [AUTOSUB_GW]: {
+      memberIds:  [1,2,3,4,5,6,11,12,13,14,15,21,22,23,24],
+      /* bench order (after the 11 starters) is 24 (FWD, blank), 6 (DEF),
+         15 (MID) — GK 2 is separately the bench keeper */
+      starterIds: [1,3,4,5,11,12,13,14,21,22,23],
+    },
+  };
+
+  const xi = Store.autoSubStarters(AUTOSUB_GW);
+  const ids = xi.map(p => p.id).sort((a,b)=>a-b);
+
+  assert.ok(ids.includes(2) && !ids.includes(1), 'blanking GK is replaced by the bench GK');
+  assert.ok(ids.includes(6) && !ids.includes(3), 'DEF gap filled by the bench defender');
+  assert.ok(ids.includes(4), 'the second blanking DEF has nobody legal to replace him and stays');
+  assert.ok(ids.includes(15) && !ids.includes(13), 'MID gap filled by the bench midfielder');
+  assert.ok(!ids.includes(24), 'a bench player who also blanked never comes on');
+  assert.equal(xi.length, 11, 'still exactly 11 after substitution');
+
+  const counts = { GK:0, DEF:0, MID:0, FWD:0 };
+  xi.forEach(p => counts[p.pos]++);
+  assert.deepEqual(counts, { GK:1, DEF:3, MID:4, FWD:3 }, 'formation stays legal throughout');
+
+  /* Bench Boost skips auto-sub entirely — every bench player already
+     counts in full, so there's nothing to correct */
+  Store.chips = { [AUTOSUB_GW]: 'bboost' };
+  Store.captains = {}; Store.vices = {};
+  Store.gwHistory = {};
+  const bbTotal = Store.gwPointsFor(AUTOSUB_GW);
+  const rawTotal = [...Store.squad].reduce((s,p) => s + (Store.pointsIn(p, AUTOSUB_GW) ?? 0), 0);
+  assert.equal(bbTotal, rawTotal, 'Bench Boost totals every player as-is, auto-sub or not');
+}
+
+/* --- Free transfers: banks one per gameweek crossed (capped at 5),
+   a real transfer spends one immediately, and a wildcard/free-hit
+   week neither costs one nor banks an extra one. ------------------- */
+{
+  Store.freeTransfers = 1;
+  Store.freeTransfersSeenGW = 5;
+  Store.chips = {};
+
+  Store.advanceFreeTransfers(8);   // crosses GW6, GW7
+  assert.equal(Store.freeTransfers, 3, 'two ordinary gameweeks crossed, two banked');
+  assert.equal(Store.freeTransfersSeenGW, 7);
+
+  Store.advanceFreeTransfers(8);   // nothing new to cross
+  assert.equal(Store.freeTransfers, 3, 're-checking the same point banks nothing twice');
+
+  Store.freeTransfers = 4;
+  Store.chips = { 9: 'wildcard' };
+  Store.freeTransfersSeenGW = 8;
+  Store.advanceFreeTransfers(10);  // crosses GW9, a wildcard week
+  assert.equal(Store.freeTransfers, 4, 'a wildcard gameweek does not bank an extra free transfer');
+
+  Store.freeTransfers = 5;
+  Store.freeTransfersSeenGW = 30;
+  Store.advanceFreeTransfers(34);
+  assert.equal(Store.freeTransfers, 5, 'the bank is capped at 5');
+
+  /* a real transfer spends one immediately */
+  Store.freeTransfers = 2;
+  Store.chips = {};
+  Store.squad = [
+    { id: 401, teamId: 1, pos: 'MID', price: 6, outGW: null, start: true },
+  ];
+  Store.currentGW = 10; Store.deadlines = {};
+  const budgetMid = { id: 402, name: 'Sub', team: 'X', teamId: 2, pos: 'MID', price: 6 };
+  const r = Store.transfer(401, budgetMid, 10);
+  assert.ok(r.ok, 'transfer succeeds');
+  assert.equal(Store.freeTransfers, 1, 'making a transfer spends exactly one banked free transfer');
+
+  /* a wildcard transfer costs nothing */
+  Store.freeTransfers = 1;
+  Store.chips = { 11: 'wildcard' };
+  Store.squad = [
+    { id: 403, teamId: 1, pos: 'FWD', price: 7, outGW: null, start: true },
+  ];
+  const budgetFwd = { id: 404, name: 'Sub2', team: 'Y', teamId: 3, pos: 'FWD', price: 7 };
+  const r2 = Store.transfer(403, budgetFwd, 11);
+  assert.ok(r2.ok);
+  assert.equal(Store.freeTransfers, 1, 'a transfer under an active wildcard does not spend a free transfer');
+}
+
+console.log('ok — 64 assertions passed');

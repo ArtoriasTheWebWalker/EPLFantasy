@@ -47,7 +47,9 @@ const Performance = {
     this.renderCaptain();
     this.renderOptimalXI();
     this.renderBenchCalls();
+    this.renderKeeperDuel();
     this.renderTransfers();
+    this.renderSeasonSummary();
   },
 
   /* -------------------------------------------------
@@ -139,6 +141,7 @@ const Performance = {
   playerChip(p){
     const g = Store.seasonMode ? Store.gradeSeason(p) : Store.gradeGW(p, Store.viewGW);
     const pts = g.pts;
+    const pool = Store.pool.find(x=>x.id===p.id);
 
     const gwForBadge = Store.seasonMode ? Store.currentGW : Store.viewGW;
     const capId  = Store.captainIdOf(gwForBadge);
@@ -164,6 +167,8 @@ const Performance = {
       showCap: true,
       cap    : isCap,
       vice   : isVice,
+      status : pool?.status,
+      news   : pool?.news,
       stripe : { text: stripeText },
       meta   : Store.seasonMode
                  ? `${p.team} · season`
@@ -416,6 +421,7 @@ const Performance = {
   gwModal(p){
     const g = Store.gradeGW(p, Store.viewGW);
     const h = p.history?.find(x=>x.gw===Store.viewGW);
+    const pool = Store.pool.find(x=>x.id===p.id);
 
     const breakdown = h ? this.breakdownRows(h, p.pos) : '';
     const spark = this.sparklineSVG(p.history, GRADE_HEX[g.grade] || GRADE_HEX.lime);
@@ -434,7 +440,7 @@ const Performance = {
 
     Modal.open(`
       <h3>${p.name}</h3>
-      <div class="m-meta">${p.team} · ${p.pos} · £${p.price.toFixed(1)}m · GW${Store.viewGW} · ${started ? 'started' : 'benched'}${chip ? ` · ${Store.CHIP_LABEL[chip]}` : ''}</div>
+      <div class="m-meta">${p.team} · ${p.pos} · £${p.price.toFixed(1)}m · GW${Store.viewGW} · ${started ? 'started' : 'benched'}${chip ? ` · ${Store.CHIP_LABEL[chip]}` : ''}${pool ? ` · ${pool.selected.toFixed(1)}% owned` : ''}</div>
       ${g.grade ? `<span class="m-grade" style="--grade:var(--${g.grade})">${CONFIG.GRADE_WORD[g.grade]}</span>${capTag}` : capTag}
 
       ${spark ? `<div class="m-sec"><h4>Season form — last ${p.history.length} weeks</h4>${spark}</div>` : ''}
@@ -449,6 +455,7 @@ const Performance = {
   seasonModal(p){
     const g = Store.gradeSeason(p);
     const hist = p.history || [];
+    const pool = Store.pool.find(x=>x.id===p.id);
 
     const cells = hist.map(h=>{
       const gg = Store.gradeGW(p, h.gw);
@@ -460,7 +467,7 @@ const Performance = {
 
     Modal.open(`
       <h3>${p.name}</h3>
-      <div class="m-meta">${p.team} · ${p.pos} · £${p.price.toFixed(1)}m · season to date</div>
+      <div class="m-meta">${p.team} · ${p.pos} · £${p.price.toFixed(1)}m · season to date${pool ? ` · ${pool.selected.toFixed(1)}% owned` : ''}</div>
       ${g.grade ? `<span class="m-grade" style="--grade:var(--${g.grade})">${CONFIG.GRADE_WORD[g.grade]} — season</span>` : ''}
 
       ${spark ? `<div class="m-sec"><h4>Form trend</h4>${spark}</div>` : ''}
@@ -699,6 +706,103 @@ const Performance = {
     el.innerHTML = `<table class="tbl">
       <thead><tr><th>GW</th><th>Best benched</th><th>Weakest starter</th><th>Verdict</th></tr></thead>
       <tbody>${rows}</tbody></table>`;
+  },
+
+  /* -------------------------------------------------
+     Keeper duel — the goalkeeper half of Bench Calls,
+     never built (the outfield-only version was the first
+     thing this table shipped with). Same shape: started
+     vs benched, and whether the bench keeper would have
+     scored more.
+  ------------------------------------------------- */
+  renderKeeperDuel(){
+    const el = document.getElementById('keeperDuelArea');
+    if(!el) return;
+    const weeks = this.playedWeeks();
+
+    if(!weeks.length){
+      el.innerHTML = emptyNote('No gameweeks played yet.');
+      return;
+    }
+
+    const rows = weeks.map(gw=>{
+      const startGK = Store.startersForGW(gw).find(p=>p.pos==='GK');
+      const benchGK = Store.benchForGW(gw).find(p=>p.pos==='GK');
+      if(!startGK || !benchGK) return '';
+      const sPts = Store.pointsIn(startGK, gw) ?? 0;
+      const bPts = Store.pointsIn(benchGK, gw) ?? 0;
+      const wrong = bPts > sPts;
+      return `<tr>
+        <td class="num">GW${gw}</td>
+        <td>${startGK.name} <span class="num">(${sPts})</span></td>
+        <td>${benchGK.name} <span class="num">(${bPts})</span></td>
+        <td style="color:var(--${wrong?'red':'lime'})">${wrong?`Lost ${bPts-sPts}`:'Right call'}</td>
+      </tr>`;
+    }).join('');
+
+    if(!rows){
+      el.innerHTML = emptyNote('Only one goalkeeper has been in the squad — nothing to compare yet.');
+      return;
+    }
+
+    el.innerHTML = `<table class="tbl">
+      <thead><tr><th>GW</th><th>Started</th><th>Benched</th><th>Verdict</th></tr></thead>
+      <tbody>${rows}</tbody></table>`;
+  },
+
+  /* -------------------------------------------------
+     Season summary — best/worst gameweek, hits taken
+     (linked accounts only — there's no reliable local
+     record of past hit costs to reconstruct otherwise),
+     and how each chip week did against your own average.
+  ------------------------------------------------- */
+  renderSeasonSummary(){
+    const el = document.getElementById('seasonSummaryArea');
+    if(!el) return;
+    const weeks = this.playedWeeks();
+
+    if(!weeks.length){
+      el.innerHTML = emptyNote('No gameweeks played yet.');
+      return;
+    }
+
+    const byGW = weeks.map(gw => ({ gw, pts: Store.gwPointsFor(gw) }));
+    const best  = [...byGW].sort((a,b)=>b.pts-a.pts)[0];
+    const worst = [...byGW].sort((a,b)=>a.pts-b.pts)[0];
+    const avg   = byGW.reduce((s,x)=>s+x.pts, 0) / byGW.length;
+
+    const totalHits = Store.managerId != null
+      ? weeks.reduce((s,gw)=> s + (Store.gwHistory[gw]?.transferCost || 0), 0)
+      : null;
+
+    const chipRows = weeks
+      .map(gw => ({ gw, chip: Store.chipOf(gw), pts: Store.gwPointsFor(gw) }))
+      .filter(x => x.chip);
+
+    const chipHTML = chipRows.length
+      ? `<table class="tbl">
+          <thead><tr><th>GW</th><th>Chip</th><th>Points</th><th>Vs. your average</th></tr></thead>
+          <tbody>${chipRows.map(r=>{
+            const diff = r.pts - avg;
+            return `<tr>
+              <td class="num">GW${r.gw}</td>
+              <td>${Store.CHIP_LABEL[r.chip]}</td>
+              <td class="num">${r.pts}</td>
+              <td style="color:var(--${diff>=0?'lime':'red'})">${diff>=0?'+':''}${diff.toFixed(1)}</td>
+            </tr>`;
+          }).join('')}</tbody></table>`
+      : emptyNote('No chips played yet this season.');
+
+    el.innerHTML = `
+      <div class="cand-stats" style="margin-bottom:18px">
+        <div class="cand-stat">Best GW<b style="color:var(--lime)">GW${best.gw} · ${best.pts}</b></div>
+        <div class="cand-stat">Worst GW<b style="color:var(--red)">GW${worst.gw} · ${worst.pts}</b></div>
+        <div class="cand-stat">Average<b>${avg.toFixed(1)}</b></div>
+        <div class="cand-stat">Hits taken<b>${totalHits!=null ? `&minus;${totalHits}` : '—'}</b></div>
+      </div>
+      <div class="mini-title">Chip weeks</div>
+      ${chipHTML}
+      ${totalHits==null ? '<div class="hint-line" style="margin-top:10px">Hits taken needs a linked FPL account — there\'s no reliable local record of past transfer costs to reconstruct otherwise.</div>' : ''}`;
   },
 
   renderTransfers(){

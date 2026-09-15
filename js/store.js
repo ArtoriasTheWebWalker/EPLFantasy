@@ -85,6 +85,18 @@ export const Store = {
   /* highest currentGW we've ever seen; used to detect deadline crossings */
   lastKnownGW: load(CONFIG.STORE.lastGW, 0),
 
+  /* Local estimate of banked free transfers — only meaningful without a
+     linked FPL account (a linked account reads the real transferCost
+     straight from FPL's own history instead, in gwPointsFor above).
+     Starts at the safe default of 1 and grows automatically as
+     gameweeks pass without a transfer, capped at 5; a real transfer()
+     call consumes one immediately. Because it only starts counting
+     from whenever this feature first ran, it can under-count real
+     banking from before that point — it's an estimate, not the
+     authoritative figure. See advanceFreeTransfers(). */
+  freeTransfers: load(CONFIG.STORE.freeTransfers, 1),
+  freeTransfersSeenGW: load(CONFIG.STORE.freeTransfersSeenGW, 0),
+
   /* linked FPL account — persisted id + last-known team/rank meta.
      When set, boot pulls picks/history from the official API and lets
      them overwrite lineups / captains / vices. Local notes, flags and
@@ -443,6 +455,15 @@ export const Store = {
     if(this.captains[cw] === outId) delete this.captains[cw];
     if(this.vices[cw]    === outId) delete this.vices[cw];
     delete this.draft[outId];
+
+    /* consumes one banked free transfer, unless a wildcard/free-hit is
+       active — those give unlimited moves for the week at no cost */
+    const chip = this.chips[tGW];
+    if(chip !== 'wildcard' && chip !== 'freehit'){
+      this.freeTransfers = Math.max(0, this.freeTransfers - 1);
+      this.persistFreeTransfers();
+    }
+
     this.persistSquad();
     this.persistDraft();
     this.persistCaps();
@@ -564,25 +585,86 @@ export const Store = {
   capMultFor(gw){ return this.chipOf(gw) === '3xc' ? 3 : 2; },
 
   /* =================================================
+     AUTO-SUBSTITUTION — the correction FPL itself makes
+     when a starter records 0 minutes: the highest-priority
+     eligible bench player who did play comes on instead,
+     formation rules permitting.
+
+     Standard fan-implementation algorithm (fill blanks in
+     bench order, skip anyone who'd break the formation) —
+     this has NOT been checked against a real official
+     auto-sub gameweek this session, unlike the scoring
+     rules elsewhere in this file, which were reconciled
+     against real totals. Treat a disagreement with the
+     official app as a reason to come back and audit this,
+     not as proof the official app is wrong.
+
+     Only affects the POINTS TOTAL (gwPointsFor below); the
+     pitch still shows the XI you actually picked, and
+     Bench Calls / Optimal XI deliberately keep using the
+     as-picked XI since those are about your decision, not
+     FPL's mechanical correction.
+  ================================================= */
+  autoSubStarters(gw){
+    const starters = this.startersForGW(gw);
+    const bench    = this.benchForGW(gw);
+    const minutesOf = p => this.minutesIn(p, gw) ?? 0;
+
+    let xi = [...starters];
+
+    /* goalkeeper — only the bench keeper can come on for a blanking
+       starting keeper, whatever the outfield bench order says */
+    const startGK = xi.find(p=>p.pos==='GK');
+    const benchGK = bench.find(p=>p.pos==='GK');
+    if(startGK && minutesOf(startGK) === 0 && benchGK && minutesOf(benchGK) > 0){
+      xi = xi.map(p => p === startGK ? benchGK : p);
+    }
+
+    const isLegalXI = list => {
+      const c = { GK:0, DEF:0, MID:0, FWD:0 };
+      list.forEach(p=>c[p.pos]++);
+      return c.GK===1 && c.DEF>=3 && c.MID>=2 && c.FWD>=1 && list.length===11;
+    };
+
+    /* outfield, in bench order — each eligible bench player who played
+       fills the first blanking starter whose removal keeps a legal XI */
+    for(const sub of bench.filter(p=>p.pos!=='GK')){
+      if(xi.includes(sub)) continue;          // already came on (shouldn't happen, but safe)
+      if(minutesOf(sub) === 0) continue;      // he didn't play either — can't help
+
+      const blanking = xi.filter(p=>p.pos!=='GK' && minutesOf(p) === 0);
+      for(const out of blanking){
+        const trial = xi.map(p => p === out ? sub : p);
+        if(isLegalXI(trial)){ xi = trial; break; }
+      }
+    }
+
+    return xi;
+  },
+
+  /* =================================================
      SCORING — the correct team total for one GW.
-     starters + captain doubling (or ×3 with Triple
-     Captain); Bench Boost adds bench points; transfer
-     hits are subtracted when we have them from FPL.
-     If a snapshot for this GW doesn't exist yet we
-     fall back to today's starters/bench so the current
-     GW still reads right before its first mutation.
+     starters (auto-sub corrected) + captain doubling (or
+     ×3 with Triple Captain); Bench Boost adds bench points
+     — and skips auto-sub entirely, since every bench player
+     already counts in full so there's nothing to correct;
+     transfer hits are subtracted when we have them from FPL.
+     If a snapshot for this GW doesn't exist yet we fall back
+     to today's starters/bench so the current GW still reads
+     right before its first mutation.
   ================================================= */
   gwPointsFor(gw){
-    /* if linked, FPL's own tally is authoritative */
+    /* if linked, FPL's own tally is authoritative (and already
+       includes real auto-subs, so nothing more to do here) */
     const hist = this.gwHistory[gw];
     if(hist && Number.isFinite(hist.points)){
       const cost = Number.isFinite(hist.transferCost) ? hist.transferCost : 0;
       return hist.points - cost;
     }
 
-    const starters = this.startersForGW(gw);
-    const eff      = this.effectiveCaptain(gw);
     const chip     = this.chipOf(gw);
+    const starters = chip === 'bboost' ? this.startersForGW(gw) : this.autoSubStarters(gw);
+    const eff      = this.effectiveCaptain(gw);
     const capMult  = this.capMultFor(gw);
 
     let total = 0;
@@ -964,8 +1046,33 @@ export const Store = {
         if(!this.lineups[gw]) this.snapshotLineup(gw);
       }
     }
+    this.advanceFreeTransfers(this.currentGW);
     this.lastKnownGW = Math.max(this.lastKnownGW, this.currentGW);
     this.persistLineups();
+  },
+
+  /* Bank one free transfer for every gameweek crossed since this was
+     last checked, capped at 5. A wildcard/free-hit week doesn't bank
+     an extra one either — you get unlimited moves that week instead,
+     so the count just carries over unchanged. transfer() below is what
+     actually spends one, at the moment a real transfer happens; this
+     only ever adds. */
+  advanceFreeTransfers(uptoGW){
+    const from = Math.max(1, (this.freeTransfersSeenGW || 0) + 1);
+    for(let gw = from; gw < uptoGW; gw++){
+      const chip = this.chips[gw];
+      if(chip !== 'wildcard' && chip !== 'freehit'){
+        this.freeTransfers = Math.min(5, this.freeTransfers + 1);
+      }
+    }
+    this.freeTransfersSeenGW = Math.max(this.freeTransfersSeenGW, uptoGW - 1);
+    this.persistFreeTransfers();
+  },
+
+  persistFreeTransfers(){
+    save(CONFIG.STORE.freeTransfers, this.freeTransfers);
+    save(CONFIG.STORE.freeTransfersSeenGW, this.freeTransfersSeenGW);
+    emit('freeTransfers');
   },
 
   persistSquad(){
@@ -1129,12 +1236,37 @@ export const Store = {
     return (player.history||[]).reduce((a,h)=>a+h.points, 0);
   },
 
+  /* Price-adjusted ratio: the same position-average ratio, scaled down
+     for a player who costs more than the "reference" £6m and up for
+     one who costs less. A £6m player at exactly the position average
+     scores 1.0 on both ratio and this — the two only diverge as price
+     moves away from the middle of the market. */
+  valueRatioFor(ratio, price){
+    return ratio / Math.max(0.1, price / 6);
+  },
+
+  /* The three-metric grade the Grading System plan called for (raw
+     points + points-vs-position-average + value), folded into the
+     grade colour itself rather than only the "Above expectation" star
+     card. Equal-weighted average of the plain position ratio and the
+     value ratio above — a budget player who modestly beats his
+     position average now grades better than an identically-modest
+     premium player, instead of both reading the same colour.
+     This is a judgement call on the weighting, not something
+     backtested the way the fixture-difficulty model was — watch it
+     for a few gameweeks rather than trusting it blindly. */
+  blendedGradeRatio(ratio, price){
+    return (ratio + this.valueRatioFor(ratio, price)) / 2;
+  },
+
   gradeGW(player, gw){
     const pts = this.pointsIn(player, gw);
     if(pts === null) return { grade:null, pts:null };
     const avg = this.posAvg?.[gw]?.[player.pos];
     if(!avg) return { grade:'amber', pts };
-    return { grade:this.gradeFromRatio(pts/avg), pts, ratio:pts/avg };
+    const ratio = pts/avg;
+    const blended = this.blendedGradeRatio(ratio, player.price);
+    return { grade:this.gradeFromRatio(blended), pts, ratio, blended };
   },
 
   gradeSeason(player){
@@ -1147,7 +1279,9 @@ export const Store = {
       if(a){ avgSum += a; n++; }
     }
     if(!n) return { grade:'amber', pts:total };
-    return { grade:this.gradeFromRatio(total/avgSum), pts:total, ratio:total/avgSum };
+    const ratio = total/avgSum;
+    const blended = this.blendedGradeRatio(ratio, player.price);
+    return { grade:this.gradeFromRatio(blended), pts:total, ratio, blended };
   },
 
   /* grade a pool player (candidate) on season form */
@@ -1160,7 +1294,9 @@ export const Store = {
     }
     if(!avgArr.length) return { grade:null, pts:poolPlayer.total };
     const expected = avgArr.reduce((a,b)=>a+b,0);
-    return { grade:this.gradeFromRatio(poolPlayer.total/expected), pts:poolPlayer.total };
+    const ratio = poolPlayer.total/expected;
+    const blended = this.blendedGradeRatio(ratio, poolPlayer.price);
+    return { grade:this.gradeFromRatio(blended), pts:poolPlayer.total, ratio, blended };
   },
 
   /* =================================================
@@ -1195,8 +1331,10 @@ export const Store = {
     const starters = this.startersForGW(gw);
     if(!starters.length) return null;
 
+    /* blended, not the plain ratio — so the background matches the
+       same grade colour the pitch itself is showing */
     const ratios = starters
-      .map(p=>this.gradeGW(p, gw).ratio)
+      .map(p=>this.gradeGW(p, gw).blended)
       .filter(Number.isFinite);
     if(!ratios.length) return null;
 
@@ -1417,13 +1555,15 @@ export const Store = {
     [CONFIG.STORE.squad, CONFIG.STORE.draft, CONFIG.STORE.cands,
      CONFIG.STORE.caps,  CONFIG.STORE.vices, CONFIG.STORE.lineups,
      CONFIG.STORE.lastGW, CONFIG.STORE.manager, CONFIG.STORE.entryMeta,
-     CONFIG.STORE.chips, CONFIG.STORE.gwHistory
+     CONFIG.STORE.chips, CONFIG.STORE.gwHistory,
+     CONFIG.STORE.freeTransfers, CONFIG.STORE.freeTransfersSeenGW
     ].forEach(k=>localStorage.removeItem(k));
     this.squad = []; this.draft = {}; this.candidates = {};
     this.captains = {}; this.vices = {};
     this.lineups = {}; this.lastKnownGW = 0;
     this.managerId = null; this.entryMeta = null;
     this.chips = {}; this.gwHistory = {};
+    this.freeTransfers = 1; this.freeTransfersSeenGW = 0;
     emit('reset');
   }
 };

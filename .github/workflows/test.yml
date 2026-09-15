@@ -1,0 +1,27 @@
+name: Tests
+
+# Runs the store/scoring regression suite on every push and PR, so a
+# broken commit gets caught here instead of only when the app is next
+# opened. Node's built-in test runner needs nothing installed beyond
+# Node itself — no package.json dependencies to cache.
+
+on:
+  push:
+    branches: ['**']
+  pull_request:
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+
+      - name: Store + scoring rules
+        run: node test/store.test.mjs
+
+      - name: Optimal XI formation search
+        run: node test/performance.test.mjs

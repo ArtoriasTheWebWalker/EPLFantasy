@@ -4,6 +4,23 @@
    file only; nothing else hard-codes these values.
 ===================================================== */
 
+/* ---------- environment-aware API base (2026-09-15) ----------
+   This file used to exist in two versions: the committed one (Worker
+   proxy, live) and an uncommitted local copy (direct FPL URL, LOCAL
+   MODE) that had to be hand-maintained forever and never committed —
+   one `git add .` from the wrong moment would ship LOCAL MODE to
+   production and silently break live data. There is only one version
+   of this file now; it picks its own base at runtime from where it's
+   actually running, so there's nothing left to accidentally commit
+   wrong. Local dev (localhost / 127.0.0.1 / opened straight from disk)
+   still gets the direct FPL URL — CORS-blocked, empty player search,
+   the same known LOCAL MODE limitation as before (run `npx serve` and
+   the Worker proxy works from localhost too if you want live data
+   while developing). Every other host, GitHub Pages included, gets the
+   Worker proxy. */
+const HOST = typeof location !== 'undefined' ? location.hostname : '';
+const IS_LOCAL = HOST === '' || HOST === 'localhost' || HOST === '127.0.0.1';
+
 export const CONFIG = {
 
   /* ---------- season ---------- */
@@ -19,7 +36,9 @@ export const CONFIG = {
      request. Set it to your own proxy when you have one.
   ------------------------------- */
   API_PROXY: '',                                         // e.g. 'https://corsproxy.io/?'
-  API_BASE : 'https://fpl-proxy-abc.abdulelah12012.workers.dev',
+  API_BASE : IS_LOCAL
+    ? 'https://fantasy.premierleague.com/api'             // LOCAL MODE — direct call, CORS-blocked, intentional
+    : 'https://fpl-proxy-abc.abdulelah12012.workers.dev',
 
   ENDPOINTS: {
     bootstrap    : '/bootstrap-static/',        // all players, teams, current GW
@@ -51,6 +70,8 @@ export const CONFIG = {
     gwHistory : 'fpl2627_gw_history',      // { [gw]: {points, transferCost, ...} } from FPL entryHistory
     bootstrap : 'fpl2627_bootstrap_cache_v4',   // _v4: boot payload gained price-change projections
     lastPage  : 'fpl2627_last_page',       // which top-level tab was open last (Performance/Draft/Table)
+    freeTransfers       : 'fpl2627_free_transfers',          // local estimate, unlinked accounts only
+    freeTransfersSeenGW : 'fpl2627_free_transfers_seen_gw',  // last GW the estimate advanced through
     settings  : 'fpl2627_settings'
   },
 

@@ -195,6 +195,24 @@ export function shirtHTML(team){
   return `<div class="shirt" style="--kit:${KITS[team] || '#8892a0'}"></div>`;
 }
 
+/* FPL's status letter → a short label and a colour. Doubtful and
+   injured/suspended/unavailable get different colours since a doubtful
+   player might still start; the rest are all "don't count on him". */
+const STATUS_META = {
+  d: { label:'D', title:'Doubtful',    cls:'doubt' },
+  i: { label:'I', title:'Injured',     cls:'out'   },
+  s: { label:'S', title:'Suspended',   cls:'out'   },
+  u: { label:'U', title:'Unavailable', cls:'out'   },
+  n: { label:'N', title:'Not in squad',cls:'out'   }
+};
+
+export function statusBadgeHTML(status, news){
+  const meta = status && status !== 'a' ? STATUS_META[status] : null;
+  if(!meta) return '';
+  const title = (meta.title + (news ? ` — ${news}` : '')).replace(/"/g, '&quot;');
+  return `<span class="status-flag ${meta.cls}" title="${title}">${meta.label}</span>`;
+}
+
 /*
   Build a player chip.
   opts:
@@ -205,6 +223,9 @@ export function shirtHTML(team){
     showCap   : draw the captain / vice badges when cap/vice is set
     cap       : true → this player is captain in the current view
     vice      : true → this player is vice in the current view
+    status    : FPL status letter (a/d/i/s/u/n) — shows a small badge
+                when not available
+    news      : injury/suspension note, used as the badge's tooltip
 
   Captain / vice are passed in because they now depend on which
   gameweek is being viewed (Store.captains is a per-GW map).
@@ -215,11 +236,11 @@ export function chipEl(player, opts={}){
   el.dataset.pid = player.id;                 // used by drag-and-drop hit testing
   el.innerHTML = `
     ${opts.showCap && opts.cap  ? '<span class="capstar">C</span>'  : ''}
-    ${opts.showCap && opts.vice ? '<span class="vicestar">V</span>' : ''}
+    ${opts.showCap && opts.vice ? '<span class="vicestar">V</span>'  : ''}
     ${player.inGW ? `<span class="in-tag">IN GW${player.inGW}</span>` : ''}
     ${shirtHTML(player.team)}
     ${opts.stripe ? `<div class="pstripe ${opts.stripe.className||''}">${opts.stripe.text}</div>` : ''}
-    <div class="name">${player.name}</div>
+    <div class="name">${player.name}${statusBadgeHTML(opts.status, opts.news)}</div>
     <div class="meta">${opts.meta ?? `${player.team} · £${player.price.toFixed(1)}m`}</div>`;
   if(opts.onClick) el.onclick = () => opts.onClick(player);
   return el;

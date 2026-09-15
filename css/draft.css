@@ -5,7 +5,7 @@
 /* ---------- chip bar — its own control, above the tabs,
    so playing a chip is never buried inside a player's card ---------- */
 .chip-bar{
-  display:flex;align-items:center;justify-content:space-between;gap:10px;
+  display:flex;align-items:center;justify-content:space-between;gap:10px;flex-wrap:wrap;
   margin-bottom:14px;padding:12px 15px;border-radius:14px;
   background:var(--glass);border:1px solid var(--glass-brd);backdrop-filter:var(--blur);
   box-shadow:inset 0 1px 0 var(--glass-hi);
@@ -27,6 +27,15 @@
   border-color:rgba(182,255,61,.5);color:var(--lime);background:rgba(182,255,61,.12);
   box-shadow:0 0 18px -6px rgba(182,255,61,.6);
 }
+
+/* ---------- free-transfer estimate pill ---------- */
+.ft-pill{
+  padding:8px 14px;border-radius:999px;border:1px dashed var(--glass-brd);
+  background:rgba(255,255,255,.03);color:var(--chalk-dim);
+  font-family:var(--font-data);font-size:10px;font-weight:600;letter-spacing:.06em;
+  cursor:help;
+}
+.ft-pill.zero{color:var(--amber);border-color:rgba(255,196,61,.4);background:rgba(255,196,61,.08)}
 
 /* ---------- flag label under the shirt ---------- */
 .chip .fstripe{

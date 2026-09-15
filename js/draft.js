@@ -19,7 +19,7 @@
 import { CONFIG } from './config.js';
 import { API }    from './api.js';
 import { Store }  from './store.js';
-import { Modal, chipEl, slotEl, searchBox, apiBanner, fixtureRunHTML, emptyNote, chipSelectHTML, wireSlideNav, toast, confirmDialog } from './ui.js';
+import { Modal, chipEl, slotEl, searchBox, apiBanner, fixtureRunHTML, emptyNote, chipSelectHTML, wireSlideNav, toast, confirmDialog, statusBadgeHTML } from './ui.js';
 
 const FLAGS = [
   { key:'hold',  label:'Hold'  },
@@ -57,6 +57,21 @@ const Draft = {
     btn.textContent = code ? `${Store.CHIP_LABEL[code]} ✓` : 'Play a chip';
     btn.classList.toggle('active', !!code);
     btn.onclick = () => this.openChipPicker(gw);
+
+    /* Free-transfer estimate — only shown unlinked. A linked account's
+       real transfer cost already comes from FPL itself and showing a
+       second, locally-estimated number next to it would just invite
+       the two to disagree. */
+    const ft = document.getElementById('ftPill');
+    if(Store.managerId){
+      ft.hidden = true;
+    }else{
+      ft.hidden = false;
+      const n = Store.freeTransfers;
+      ft.textContent = `${n} free transfer${n===1?'':'s'}`;
+      ft.title = 'Local estimate — starts from 1 and grows automatically. Not authoritative; link your FPL account for the real figure.';
+      ft.classList.toggle('zero', n === 0);
+    }
   },
 
   openChipPicker(gw){
@@ -127,6 +142,7 @@ const Draft = {
     const g  = Store.gradeSeason(p);           // season form drives colour
     const st = Store.draftOf(p.id);
     const label = FLAGS.find(f=>f.key===st.flag)?.label || 'Hold';
+    const pool = Store.pool.find(x=>x.id===p.id);   // status/news/ownership live on the pool copy
 
     const gwNow  = Store.editableGW();
     const capId  = Store.captainIdOf(gwNow);
@@ -137,6 +153,8 @@ const Draft = {
       showCap: true,
       cap    : capId  != null && p.id === capId,
       vice   : viceId != null && p.id === viceId,
+      status : pool?.status,
+      news   : pool?.news,
       meta   : `${p.team} · ${g.pts||0} pts`
       /* no onClick here — makeInteractive tells a tap from a drag */
     });
@@ -290,14 +308,19 @@ const Draft = {
     const st   = Store.draftOf(p.id);
     const g    = Store.gradeSeason(p);
     const runs = fixtureRunHTML(p.teamId, 5);
+    const pool = Store.pool.find(x=>x.id===p.id);
 
     const gw   = Store.editableGW();
     const isCap  = Store.captainIdOf(gw) === p.id;
     const isVice = Store.viceIdOf(gw)    === p.id;
 
+    const newsLine = pool?.status && pool.status !== 'a' && pool.news
+      ? `<div class="hint-line" style="color:var(--amber)">${pool.news}</div>` : '';
+
     Modal.open(`
       <h3>${p.name}</h3>
-      <div class="m-meta">${p.team} · ${p.pos} · £${p.price.toFixed(1)}m · ${g.pts||0} pts this season</div>
+      <div class="m-meta">${p.team} · ${p.pos} · £${p.price.toFixed(1)}m · ${g.pts||0} pts this season${pool ? ` · ${pool.selected.toFixed(1)}% owned` : ''}</div>
+      ${newsLine}
       ${g.grade ? `<span class="m-grade" style="--grade:var(--${g.grade})">${CONFIG.GRADE_WORD[g.grade]} — season</span>` : ''}
 
       <div class="m-sec">
@@ -488,21 +511,26 @@ const Draft = {
     const mySquadSamePos = Store.squad.filter(p=>p.pos===c.pos);
     const move = this.priceMoveTonight(pool);
 
+    const newsHint = pool?.status && pool.status !== 'a' && pool.news
+      ? `<div class="hint-line" style="color:var(--amber)">${pool.news}</div>` : '';
+
     card.innerHTML = `
       <div class="cand-top">
         <div>
-          <div class="cand-name">${c.name}</div>
+          <div class="cand-name">${c.name}${statusBadgeHTML(pool?.status, pool?.news)}</div>
           <div class="cand-sub">${c.team} · ${c.pos} · £${c.price.toFixed(1)}m
             ${move ? `<span class="price-move ${move}">${move==='up' ? '▲ rising tonight' : '▼ falling tonight'}</span>` : ''}
           </div>
         </div>
         <button class="cand-x" title="Remove from shortlist">✕</button>
       </div>
+      ${newsHint}
 
       <div class="cand-stats">
         <div class="cand-stat">GW${lastGW}<b>${lastPts ?? '—'}</b></div>
         <div class="cand-stat">Season avg<b>${seasonAvg}</b></div>
         <div class="cand-stat">Season total<b class="graded">${pool?.total ?? '—'}</b></div>
+        <div class="cand-stat">Owned<b>${pool ? pool.selected.toFixed(1)+'%' : '—'}</b></div>
       </div>
 
       ${fixtureRunHTML(c.teamId, 5)}
