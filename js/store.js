@@ -1344,12 +1344,15 @@ export const Store = {
      use the same players and the same edge — it's the size of
      what's riding on them, not two different predictions.
 
-     Each differential also carries `alt` — the highest-owned
-     player at his position not currently in the squad, i.e.
-     the template pick he's being chosen over — and `altCost`,
-     that player's own ownership x ppg. That's the flip side:
-     not what the differential could win you, but roughly what
-     the template alternative could cost you by comparison.
+     Each differential also carries `alt` — a player at his
+     position not currently in the squad, i.e. a template pick
+     being chosen over — and `altCost`, that player's own
+     ownership x ppg. That's the flip side: not what the
+     differential could win you, but roughly what the
+     alternative could cost you by comparison. Two or more
+     differentials at the same position each get a DIFFERENT
+     alt, working down the ownership order, rather than all
+     of them pointing at the same single highest-owned name.
   ================================================= */
   DIFFERENTIAL_CUTOFF: 10,   // % owned; below this counts as a differential
 
@@ -1364,17 +1367,34 @@ export const Store = {
     }).filter(r => r.ownership < this.DIFFERENTIAL_CUTOFF)
       .sort((a,b) => b.edge - a.edge);
 
-    /* For each differential, the highest-owned player at his position
-       that isn't in the squad — the template pick being passed over
-       for him. His own edge formula run in reverse (ownership x ppg,
-       not (100%-ownership) x ppg) says roughly how much of the field's
-       going rate on that position is being given up by not holding
-       him instead. */
+    /* For each differential, a player at his position who isn't in
+       the squad — a template pick being passed over for him. His own
+       edge formula run in reverse (ownership x ppg, not (100%-
+       ownership) x ppg) says roughly how much of the field's going
+       rate on that position is being given up by not holding him.
+
+       When two or more differentials share a position, each gets a
+       DIFFERENT alternative, working down the ownership order — the
+       biggest differential (highest edge, so first in `rows`) against
+       the single highest-owned unowned player, the next against the
+       second-highest, and so on. Three differential midfielders
+       comparing against the same one name every time was the bug this
+       fixes: each unowned candidate at a position is only ever handed
+       out once. */
     const ownedIds = new Set(this.activeSquad().map(p => p.id));
+    const candidatesByPos = {};   // pos -> sorted unowned candidates, consumed as rows claim one
+    const nextIndexByPos = {};
+
     rows.forEach(r => {
-      const alt = this.pool
-        .filter(x => x.pos === r.player.pos && !ownedIds.has(x.id))
-        .sort((a,b) => b.selected - a.selected)[0] || null;
+      const pos = r.player.pos;
+      if(!candidatesByPos[pos]){
+        candidatesByPos[pos] = this.pool
+          .filter(x => x.pos === pos && !ownedIds.has(x.id))
+          .sort((a,b) => b.selected - a.selected);
+        nextIndexByPos[pos] = 0;
+      }
+      const alt = candidatesByPos[pos][nextIndexByPos[pos]] || null;
+      if(alt) nextIndexByPos[pos]++;
       r.alt = alt;
       r.altCost = alt ? (alt.selected/100) * alt.ppg : 0;
     });

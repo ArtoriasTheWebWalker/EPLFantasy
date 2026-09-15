@@ -405,4 +405,36 @@ assert.deepEqual(Store.lineups[6].starterIds, [301, 303], 'a future week snapsho
   assert.ok(Math.abs(defRow.altCost - (55/100)*8) < 1e-9);
 }
 
-console.log('ok — 80 assertions passed');
+/* --- Multiple differentials at the same position must each get a
+   DIFFERENT alternative, not all pointing at the single highest-owned
+   name — three differential midfielders comparing against the same
+   one player was the exact bug this covers. -----------------------*/
+{
+  Store.currentGW = 70;
+  Store.gwHistory = {};
+
+  Store.squad = [
+    { id:3001, teamId:1, pos:'MID', outGW:null, start:true, history:[] },
+    { id:3002, teamId:1, pos:'MID', outGW:null, start:true, history:[] },
+    { id:3003, teamId:1, pos:'MID', outGW:null, start:true, history:[] },
+  ];
+  Store.pool = [
+    { id:3001, pos:'MID', selected:2, ppg:10 },
+    { id:3002, pos:'MID', selected:4, ppg:9  },
+    { id:3003, pos:'MID', selected:6, ppg:8  },
+    { id:4001, pos:'MID', selected:70, ppg:12 },   // highest-owned unowned MID
+    { id:4002, pos:'MID', selected:50, ppg:11 },   // second-highest
+    { id:4003, pos:'MID', selected:30, ppg:9  },   // third-highest
+  ];
+
+  const exp2 = Store.teamDifferentialExposure();
+  assert.equal(exp2.rows.length, 3, 'all three qualify as differentials');
+  assert.deepEqual(exp2.rows.map(r=>r.player.id), [3001,3002,3003], 'sorted by edge, largest first (9.8, 8.64, 7.52)');
+
+  assert.equal(exp2.rows[0].alt.id, 4001, 'the biggest differential gets the single highest-owned alternative');
+  assert.equal(exp2.rows[1].alt.id, 4002, 'the next differential at the SAME position gets the next-highest, not a repeat');
+  assert.equal(exp2.rows[2].alt.id, 4003, 'and the third gets the third-highest');
+  assert.equal(new Set(exp2.rows.map(r=>r.alt.id)).size, 3, 'all three alternatives are distinct players');
+}
+
+console.log('ok — 86 assertions passed');
