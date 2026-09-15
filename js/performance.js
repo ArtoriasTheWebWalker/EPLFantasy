@@ -18,7 +18,7 @@
 
 import { CONFIG } from './config.js';
 import { Store }  from './store.js';
-import { Modal, chipEl, apiBanner, emptyNote } from './ui.js';
+import { Modal, chipEl, apiBanner, emptyNote, wireSlideNav } from './ui.js';
 
 /* concrete grade colours (kept in sync with css :root) — used where an
    inline SVG needs a real colour value rather than a CSS variable */
@@ -27,32 +27,7 @@ const GRADE_HEX = { blue:'#4FB8FF', green:'#4BE58A', amber:'#FFC43D', red:'#FF5A
 const Performance = {
 
   mount(){
-    const nav   = document.querySelector('#page-performance .slide-nav');
-    const snavs = document.querySelectorAll('#page-performance .snav');
-
-    const move = (btn, instant) => {
-      if(!btn || !nav) return;
-      if(instant) nav.classList.add('no-anim');
-      nav.style.setProperty('--ind-x', btn.offsetLeft   + 'px');
-      nav.style.setProperty('--ind-y', btn.offsetTop    + 'px');
-      nav.style.setProperty('--ind-w', btn.offsetWidth  + 'px');
-      nav.style.setProperty('--ind-h', btn.offsetHeight + 'px');
-      if(instant) requestAnimationFrame(()=>requestAnimationFrame(()=>nav.classList.remove('no-anim')));
-    };
-
-    snavs.forEach(btn=>{
-      btn.onclick = () => {
-        snavs.forEach(b=>b.classList.remove('active'));
-        btn.classList.add('active');
-        document.querySelectorAll('#page-performance .slide').forEach(s=>s.classList.remove('active'));
-        document.getElementById(btn.dataset.slide).classList.add('active');
-        move(btn);
-      };
-    });
-
-    const settle = () => move(document.querySelector('#page-performance .snav.active') || snavs[0], true);
-    settle();
-    window.addEventListener('resize', settle);
+    wireSlideNav('#page-performance');
   },
 
   /* A gameweek is "past" once its deadline has gone, not merely once
@@ -64,11 +39,13 @@ const Performance = {
   render(){
     document.getElementById('perfBanner').innerHTML = apiBanner(Store.apiState || 'offline');
     this.renderHero();
+    this.renderRankTrend();
     this.renderGWRow();
     this.renderStars();
     this.renderPitch();
     this.renderStatus();
     this.renderCaptain();
+    this.renderOptimalXI();
     this.renderBenchCalls();
     this.renderTransfers();
   },
@@ -299,6 +276,62 @@ const Performance = {
   },
 
   /* -------------------------------------------------
+     rank trend — overall rank across the season, from
+     gwHistory[gw].overallRank (linked accounts only, set
+     by Store.syncFromFPL). Lower rank is better, so unlike
+     the points sparkline a falling line means improving.
+  ------------------------------------------------- */
+  rankSparklineSVG(pairs, color){
+    if(pairs.length < 2) return '';
+
+    const ranks = pairs.map(p=>p.rank);
+    const w=100, h=32, pad=3;
+    const min=Math.min(...ranks), max=Math.max(...ranks), rng=Math.max(1, max-min);
+    const stepX=(w - pad*2)/(pairs.length - 1);
+    /* best (lowest) rank sits highest on the chart — inverse of the
+       points sparkline, where the biggest number sits at the top */
+    const coords=pairs.map((p,i)=>[ pad + i*stepX, pad + (h - pad*2)*((p.rank-min)/rng) ]);
+
+    const line=coords.map((c,i)=>(i?'L':'M') + c[0].toFixed(1) + ' ' + c[1].toFixed(1)).join(' ');
+    const last=coords.at(-1);
+
+    return `<svg class="sparkline" viewBox="0 0 ${w} ${h}" preserveAspectRatio="none" aria-hidden="true">
+      <path d="${line}" fill="none" stroke="${color}" stroke-width="2"
+            stroke-linecap="round" stroke-linejoin="round" vector-effect="non-scaling-stroke"/>
+      <circle cx="${last[0].toFixed(1)}" cy="${last[1].toFixed(1)}" r="2.6" fill="${color}"/>
+    </svg>`;
+  },
+
+  renderRankTrend(){
+    const el = document.getElementById('rankTrend');
+    if(!el) return;
+
+    const pairs = this.playedWeeks()
+      .map(gw => ({ gw, rank: Store.gwHistory?.[gw]?.overallRank }))
+      .filter(p => Number.isFinite(p.rank));
+
+    /* only worth showing once linked and there's a trend to see */
+    if(!Store.entryMeta || pairs.length < 2){ el.innerHTML = ''; return; }
+
+    const spark = this.rankSparklineSVG(pairs, '#3DE8FF');
+    const delta = pairs[0].rank - pairs.at(-1).rank;   // +ve = rank number fell = improved
+    const trend = delta > 0
+      ? `▲ improved ${delta.toLocaleString()}`
+      : delta < 0
+        ? `▼ dropped ${Math.abs(delta).toLocaleString()}`
+        : 'steady';
+
+    el.innerHTML = `
+      <div class="rank-trend-card">
+        <div class="rank-trend-head">
+          <div class="ht-label">Overall rank · GW${pairs[0].gw}&ndash;${pairs.at(-1).gw}</div>
+          <div class="rank-trend-delta" style="color:${delta>=0?'var(--lime)':'var(--red)'}">${trend}</div>
+        </div>
+        ${spark}
+      </div>`;
+  },
+
+  /* -------------------------------------------------
      squad completeness readout (carries squad value)
   ------------------------------------------------- */
   renderStatus(){
@@ -526,6 +559,67 @@ const Performance = {
       <thead><tr><th>GW</th><th>Captain</th><th>Captain pts</th><th>Best in squad</th><th>Verdict</th></tr></thead>
       <tbody>${rows}</tbody></table>
       <div class="cap-rate">Right call in <b>${hits}/${counted}</b> weeks · <b>${rate}%</b></div>`;
+  },
+
+  /* -------------------------------------------------
+     Optimal XI — the best legal starting eleven that
+     could have been fielded from the full GW squad, so
+     "points left on the bench" covers every reshuffle,
+     not just the one swap Bench Calls below checks for.
+     Exhaustive over the small formation space (3-5 DEF,
+     2-5 MID, 1-3 FWD, 10 outfield), so it's always exact.
+  ------------------------------------------------- */
+  optimalXI(squadGW, gw){
+    const byPos = pos => squadGW.filter(p=>p.pos===pos)
+      .map(p=>({ p, pts: Store.pointsIn(p, gw) ?? 0 }))
+      .sort((a,b)=>b.pts-a.pts);
+
+    const gks  = byPos('GK'), defs = byPos('DEF'), mids = byPos('MID'), fwds = byPos('FWD');
+    const sumTop = (arr,n) => arr.slice(0,n).reduce((s,x)=>s+x.pts, 0);
+    const gkPts = gks.length ? gks[0].pts : 0;
+
+    let best = 0, shape = null;
+    for(let d=3; d<=5; d++){
+      for(let m=2; m<=5; m++){
+        const f = 10 - d - m;
+        if(f < 1 || f > 3) continue;
+        if(d > defs.length || m > mids.length || f > fwds.length) continue;
+        const total = sumTop(defs,d) + sumTop(mids,m) + sumTop(fwds,f);
+        if(!shape || total > best){ best = total; shape = `${d}-${m}-${f}`; }
+      }
+    }
+    return { points: gkPts + best, shape };
+  },
+
+  renderOptimalXI(){
+    const el = document.getElementById('optimalArea');
+    const weeks = this.playedWeeks();
+
+    if(!weeks.length){
+      el.innerHTML = emptyNote('No gameweeks played yet.');
+      return;
+    }
+
+    let totalLeft = 0;
+    const rows = weeks.map(gw=>{
+      const squadGW = Store.squadForGW(gw);
+      const actual  = Store.startersForGW(gw).reduce((s,p)=>s + (Store.pointsIn(p,gw) ?? 0), 0);
+      const opt     = this.optimalXI(squadGW, gw);
+      const left    = Math.max(0, opt.points - actual);
+      totalLeft += left;
+
+      return `<tr>
+        <td class="num">GW${gw}</td>
+        <td class="num">${actual}</td>
+        <td>${opt.points}${opt.shape ? ` <span class="vtag">${opt.shape}</span>` : ''}</td>
+        <td style="color:var(--${left ? 'amber' : 'lime'})">${left ? `&minus;${left}` : 'Optimal'}</td>
+      </tr>`;
+    }).join('');
+
+    el.innerHTML = `<table class="tbl">
+      <thead><tr><th>GW</th><th>Your XI</th><th>Best possible</th><th>Left behind</th></tr></thead>
+      <tbody>${rows}</tbody></table>
+      <div class="cap-rate">Points left on the bench this season: <b>${totalLeft}</b></div>`;
   },
 
   renderBenchCalls(){

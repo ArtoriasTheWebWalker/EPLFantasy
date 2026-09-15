@@ -8,6 +8,42 @@
 import { CONFIG, KITS } from './config.js';
 import { Store } from './store.js';
 
+/* ---------- sliding tab nav ----------
+   Shared by any page using the .slide-nav / .snav / .slide markup
+   (Performance's Squad/Captain/Bench/Transfers, Draft's Board/Shortlist).
+   Wire once from a page's mount(); render() never touches the tabs
+   themselves, so the active tab survives a re-render.
+----------------------------------------- */
+export function wireSlideNav(rootSelector){
+  const nav   = document.querySelector(`${rootSelector} .slide-nav`);
+  const snavs = document.querySelectorAll(`${rootSelector} .snav`);
+  if(!nav || !snavs.length) return;
+
+  const move = (btn, instant) => {
+    if(!btn) return;
+    if(instant) nav.classList.add('no-anim');
+    nav.style.setProperty('--ind-x', btn.offsetLeft   + 'px');
+    nav.style.setProperty('--ind-y', btn.offsetTop    + 'px');
+    nav.style.setProperty('--ind-w', btn.offsetWidth  + 'px');
+    nav.style.setProperty('--ind-h', btn.offsetHeight + 'px');
+    if(instant) requestAnimationFrame(()=>requestAnimationFrame(()=>nav.classList.remove('no-anim')));
+  };
+
+  snavs.forEach(btn=>{
+    btn.onclick = () => {
+      snavs.forEach(b=>b.classList.remove('active'));
+      btn.classList.add('active');
+      document.querySelectorAll(`${rootSelector} .slide`).forEach(s=>s.classList.remove('active'));
+      document.getElementById(btn.dataset.slide).classList.add('active');
+      move(btn);
+    };
+  });
+
+  const settle = () => move(document.querySelector(`${rootSelector} .snav.active`) || snavs[0], true);
+  settle();
+  window.addEventListener('resize', settle);
+}
+
 /* ---------- modal ---------- */
 
 export const Modal = {

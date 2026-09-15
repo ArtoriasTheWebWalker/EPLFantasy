@@ -19,7 +19,7 @@
 import { CONFIG } from './config.js';
 import { API }    from './api.js';
 import { Store }  from './store.js';
-import { Modal, chipEl, slotEl, searchBox, apiBanner, fixtureRunHTML, emptyNote, chipSelectHTML } from './ui.js';
+import { Modal, chipEl, slotEl, searchBox, apiBanner, fixtureRunHTML, emptyNote, chipSelectHTML, wireSlideNav } from './ui.js';
 
 const FLAGS = [
   { key:'hold',  label:'Hold'  },
@@ -29,12 +29,48 @@ const FLAGS = [
 
 const Draft = {
 
-  mount(){ /* nothing to wire once — render handles it all */ },
+  mount(){ wireSlideNav('#page-draft'); },
 
   render(){
     document.getElementById('draftBanner').innerHTML = apiBanner(Store.apiState || 'offline');
+    this.renderChipBar();
     this.renderPitch();
     this.renderCandidates();
+  },
+
+  /* =================================================
+     CHIP — its own control, not tucked inside a
+     specific player's modal. A chip is a squad-wide
+     decision, so it gets a squad-wide place to live.
+  ================================================= */
+  renderChipBar(){
+    const gw = Store.editableGW();
+    document.getElementById('chipBarGW').textContent = `GW${gw}`;
+
+    const code = Store.chipOf(gw);
+    const btn = document.getElementById('chipBtn');
+    btn.textContent = code ? `${Store.CHIP_LABEL[code]} ✓` : 'Play a chip';
+    btn.classList.toggle('active', !!code);
+    btn.onclick = () => this.openChipPicker(gw);
+  },
+
+  openChipPicker(gw){
+    Modal.open(`
+      <h3>Chip</h3>
+      <div class="m-meta">GW${gw}</div>
+      <div class="m-sec">${chipSelectHTML(gw)}</div>
+    `);
+
+    document.getElementById('chipSel').onchange = e => {
+      const r = Store.setChip(gw, e.target.value);
+      if(!r.ok){
+        alert(r.reason);
+        e.target.value = Store.chipOf(gw) || '';
+        return;
+      }
+      Modal.close();
+      this.render();
+    };
   },
 
   /* =================================================
@@ -255,48 +291,36 @@ const Draft = {
       ${g.grade ? `<span class="m-grade" style="--grade:var(--${g.grade})">${CONFIG.GRADE_WORD[g.grade]} — season</span>` : ''}
 
       <div class="m-sec">
-        <h4>Armband — GW${gw}</h4>
+        <h4>Armband &amp; selection — GW${gw}</h4>
         <div class="m-actions">
           <button class="m-btn ${isCap?'on':'primary'}" id="btnCap">${isCap?'Captain ✓':'Make captain'}</button>
           <button class="m-btn ${isVice?'on':''}" id="btnVice">${isVice?'Vice ✓':'Make vice'}</button>
-        </div>
-      </div>
-
-      <div class="m-sec">
-        <h4>Chip — GW${gw}</h4>
-        ${chipSelectHTML(gw)}
-      </div>
-
-      <div class="m-sec">
-        <h4>Selection</h4>
-        <div class="m-actions">
           <button class="m-btn" id="btnStart">${p.start?'Move to bench':'Move to XI'}</button>
         </div>
       </div>
 
       <div class="m-sec">
-        <h4>Next 5 fixtures</h4>
-        ${runs}
-      </div>
-
-      <div class="m-sec">
-        <h4>Your flag</h4>
+        <h4>Your plan</h4>
         <div class="flag-toggle">
           ${FLAGS.map(f=>`<button class="${f.key}${st.flag===f.key?' on':''}" data-flag="${f.key}">${f.label}</button>`).join('')}
         </div>
-      </div>
-
-      <div class="m-sec">
-        <h4>Your notes</h4>
         <textarea class="note-box" id="playerNote"
           placeholder="What you've seen, what you're planning, when you'd move him…">${st.note||''}</textarea>
       </div>
 
-      <div class="m-actions">
-        <button class="m-btn warn" id="btnSwap">⇄ Transfer this player</button>
-        <button class="m-btn danger" id="btnRemove">Remove</button>
-      </div>
-      <div class="swap-panel" id="swapPanel"></div>
+      <details class="m-disclose">
+        <summary>Next 5 fixtures</summary>
+        ${runs}
+      </details>
+
+      <details class="m-disclose">
+        <summary>Transfer or remove</summary>
+        <div class="m-actions">
+          <button class="m-btn warn" id="btnSwap">⇄ Transfer this player</button>
+          <button class="m-btn danger" id="btnRemove">Remove</button>
+        </div>
+        <div class="swap-panel" id="swapPanel"></div>
+      </details>
     `, `var(--${g.grade||'lime'})`);
 
     /* wire actions */
@@ -308,15 +332,6 @@ const Draft = {
     document.getElementById('btnVice').onclick = () => {
       Store.setVice(p.id);
       Modal.close();
-      this.render();
-    };
-    document.getElementById('chipSel').onchange = e => {
-      const r = Store.setChip(gw, e.target.value);
-      if(!r.ok){
-        alert(r.reason);
-        e.target.value = Store.chipOf(gw) || '';   // put the select back
-        return;
-      }
       this.render();
     };
     document.getElementById('btnStart').onclick = () => {
@@ -373,8 +388,10 @@ const Draft = {
   },
 
   /* =================================================
-     CANDIDATES — one section per position, always
-     visible so a note is never hidden behind a click.
+     CANDIDATES — one section per position. The vitals
+     (form, fixtures) stay visible on the card; the plan
+     (swap target, note) sits behind one tap so a long
+     shortlist doesn't turn into a wall of open text boxes.
   ================================================= */
   renderCandidates(){
     const host = document.getElementById('candidateArea');
@@ -442,24 +459,26 @@ const Draft = {
 
       ${fixtureRunHTML(c.teamId, 5)}
 
-      <div class="swap-plan">
-        <label>Swap with</label>
-        <select class="sel-swap">
-          <option value="">— nobody yet —</option>
-          ${mySquadSamePos.map(p=>`<option value="${p.id}" ${c.swapWith===p.id?'selected':''}>${p.name}</option>`).join('')}
-        </select>
-        <label>at</label>
-        <select class="sel-gw">
-          <option value="">— GW —</option>
-          ${Array.from({length:CONFIG.TOTAL_GW},(_,i)=>i+1)
-            .filter(gw=>gw >= Store.editableGW())
-            .map(gw=>`<option value="${gw}" ${c.targetGW===gw?'selected':''}>GW${gw}</option>`).join('')}
-        </select>
-      </div>
-
       ${c.swapWith && c.targetGW ? `<div class="plan-tag">Planned: ${c.name} in for ${Store.squad.find(p=>p.id===c.swapWith)?.name || '?'} at GW${c.targetGW}</div>` : ''}
 
-      <textarea class="note-box" placeholder="Why him — form, fixtures, price, when you'd pull the trigger…">${c.note||''}</textarea>`;
+      <details class="m-disclose">
+        <summary>Plan &amp; notes${c.note?.trim() ? '<span class="summary-dot"></span>' : ''}</summary>
+        <div class="swap-plan">
+          <label>Swap with</label>
+          <select class="sel-swap">
+            <option value="">— nobody yet —</option>
+            ${mySquadSamePos.map(p=>`<option value="${p.id}" ${c.swapWith===p.id?'selected':''}>${p.name}</option>`).join('')}
+          </select>
+          <label>at</label>
+          <select class="sel-gw">
+            <option value="">— GW —</option>
+            ${Array.from({length:CONFIG.TOTAL_GW},(_,i)=>i+1)
+              .filter(gw=>gw >= Store.editableGW())
+              .map(gw=>`<option value="${gw}" ${c.targetGW===gw?'selected':''}>GW${gw}</option>`).join('')}
+          </select>
+        </div>
+        <textarea class="note-box" placeholder="Why him — form, fixtures, price, when you'd pull the trigger…">${c.note||''}</textarea>
+      </details>`;
 
     card.querySelector('.cand-x').onclick = () => {
       if(confirm(`Remove ${c.name} from your shortlist?`)) Store.removeCandidate(c.id);

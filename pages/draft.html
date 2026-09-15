@@ -6,31 +6,51 @@
 
 <div id="draftBanner"></div>
 
-<section>
-  <div class="sec-head">
-    <h2><span class="tag">Season view</span>Draft board</h2>
+<div class="chip-bar">
+  <div class="chip-bar-label">Chip &middot; <span id="chipBarGW"></span></div>
+  <button id="chipBtn" class="chip-pill"></button>
+</div>
+
+<div class="slide-nav" style="--slide-accent:var(--lime)">
+  <button class="snav active" data-slide="d-board">Squad board</button>
+  <button class="snav" data-slide="d-watch">Shortlist</button>
+</div>
+
+<div class="slides">
+
+  <!-- ---------- SQUAD BOARD ---------- -->
+  <div class="slide active" id="d-board">
+    <section style="margin-bottom:0">
+      <div class="sec-head">
+        <h2><span class="tag">Season view</span>Draft board</h2>
+      </div>
+
+      <div class="pitch" id="draftPitch"><div class="goalmouth"></div></div>
+
+      <div class="bench">
+        <div class="mini-title">Bench</div>
+        <div class="bench-row" id="draftBench"></div>
+      </div>
+
+      <div class="legend">
+        <span><i style="background:var(--blue)"></i>Exceptional</span>
+        <span><i style="background:var(--green)"></i>Good</span>
+        <span><i style="background:var(--amber)"></i>Average</span>
+        <span><i style="background:var(--red)"></i>Underperformed</span>
+        <span style="opacity:.6">&middot;</span>
+        <span>Flag shown under each shirt</span>
+      </div>
+    </section>
   </div>
 
-  <div class="pitch" id="draftPitch"><div class="goalmouth"></div></div>
-
-  <div class="bench">
-    <div class="mini-title">Bench</div>
-    <div class="bench-row" id="draftBench"></div>
+  <!-- ---------- SHORTLIST ---------- -->
+  <div class="slide" id="d-watch">
+    <section style="margin-bottom:0">
+      <div class="sec-head">
+        <h2><span class="tag">Watchlist</span>Players I'm considering</h2>
+      </div>
+      <div id="candidateArea"></div>
+    </section>
   </div>
 
-  <div class="legend">
-    <span><i style="background:var(--blue)"></i>Exceptional</span>
-    <span><i style="background:var(--green)"></i>Good</span>
-    <span><i style="background:var(--amber)"></i>Average</span>
-    <span><i style="background:var(--red)"></i>Underperformed</span>
-    <span style="opacity:.6">·</span>
-    <span>Flag shown under each shirt</span>
-  </div>
-</section>
-
-<section>
-  <div class="sec-head">
-    <h2><span class="tag">Watchlist</span>Players I'm considering</h2>
-  </div>
-  <div id="candidateArea"></div>
-</section>
+</div>

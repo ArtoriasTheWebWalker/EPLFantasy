@@ -10,16 +10,19 @@
 
 import { CONFIG, KITS } from './config.js';
 import { Store }        from './store.js';
-import { apiBanner, emptyNote } from './ui.js';
+import { apiBanner, emptyNote, wireSlideNav } from './ui.js';
 
 const TablePage = {
 
-  mount(){},
+  gwView: null,   // which gameweek the "By gameweek" tab is showing
+
+  mount(){ wireSlideNav('#page-table'); },
 
   render(){
     document.getElementById('tableBanner').innerHTML = apiBanner(Store.apiState || 'offline');
     this.renderTable();
     this.renderFixtures();
+    this.renderByGW();
   },
 
   /* =================================================
@@ -102,13 +105,86 @@ const TablePage = {
         </span>`;
       }).join('');
 
+      /* next-5 run summary, so a run can be read at a glance without
+         hovering every cell — same tiers the Draft page fixture strip
+         already uses, just averaged */
+      const run = Store.nextFixtures(t.id, 5);
+      const avgTier = run.length ? run.reduce((s,r)=>s+r.tier, 0) / run.length : null;
+      const avgMeta = avgTier != null ? Store.tierMeta(Math.round(avgTier)) : null;
+      const runBadge = avgMeta
+        ? `<span class="run-chip" style="--tc:${avgMeta.color}" title="Average difficulty of the next ${run.length} fixtures">Next ${run.length}: ${avgMeta.label}</span>`
+        : '';
+
       return `<div class="team-fix">
         <div class="team-fix-head">
           <span class="badge" style="--kit:${KITS[t.short] || '#8892a0'}"></span>
           <b>${t.name}</b>
-          ${row ? `<span class="pos-chip">${row.position} · ${row.Pts} pts</span>` : ''}
+          <div class="head-badges">
+            ${row ? `<span class="pos-chip">${row.position} · ${row.Pts} pts</span>` : ''}
+            ${runBadge}
+          </div>
         </div>
         <div class="fix-strip">${cells}</div>
+      </div>`;
+    }).join('');
+  },
+
+  /* =================================================
+     FIXTURES — by gameweek, all matches for one week
+  ================================================= */
+  renderByGW(){
+    const pillRow = document.getElementById('fxGwRow');
+    const host    = document.getElementById('fxGwArea');
+    if(!pillRow || !host) return;
+
+    if(!Store.fixtures.length){
+      pillRow.innerHTML = '';
+      host.innerHTML = emptyNote('Fixtures arrive with the FPL API.');
+      return;
+    }
+
+    const gws = [...new Set(Store.fixtures.map(f=>f.gw))].filter(Boolean).sort((a,b)=>a-b);
+    if(this.gwView == null || !gws.includes(this.gwView)){
+      this.gwView = gws.includes(Store.currentGW) ? Store.currentGW : gws[0];
+    }
+
+    pillRow.innerHTML = gws.map(gw=>
+      `<button class="gw${gw===this.gwView?' active':''}" data-gw="${gw}">GW${gw}</button>`
+    ).join('');
+    pillRow.querySelectorAll('[data-gw]').forEach(b=>{
+      b.onclick = () => { this.gwView = +b.dataset.gw; this.renderByGW(); };
+    });
+
+    const matches = Store.fixtures
+      .filter(f=>f.gw === this.gwView)
+      .sort((a,b)=>(a.kickoff||'').localeCompare(b.kickoff||''));
+
+    if(!matches.length){
+      host.innerHTML = emptyNote(`No fixtures found for GW${this.gwView}.`);
+      return;
+    }
+
+    host.innerHTML = matches.map(f=>{
+      const home = Store.teamById[f.homeId], away = Store.teamById[f.awayId];
+      const hTier = Store.tierMeta(Store.tierOf(f.homeId));
+      const aTier = Store.tierMeta(Store.tierOf(f.awayId));
+      const score = f.finished && f.homeScore != null
+        ? `${f.homeScore} &ndash; ${f.awayScore}`
+        : 'vs';
+      const kickoff = !f.finished && f.kickoff
+        ? new Date(f.kickoff).toLocaleString(undefined, { weekday:'short', hour:'2-digit', minute:'2-digit' })
+        : (f.finished ? 'FT' : '');
+
+      return `<div class="gwm">
+        <div class="gwm-team" style="--tc:${hTier.color}">
+          <span class="badge" style="--kit:${KITS[home?.short] || '#8892a0'}"></span>
+          <span class="gwm-name">${home?.name || '?'}</span>
+        </div>
+        <div class="gwm-mid"><b>${score}</b><small>${kickoff}</small></div>
+        <div class="gwm-team right" style="--tc:${aTier.color}">
+          <span class="gwm-name">${away?.name || '?'}</span>
+          <span class="badge" style="--kit:${KITS[away?.short] || '#8892a0'}"></span>
+        </div>
       </div>`;
     }).join('');
   }

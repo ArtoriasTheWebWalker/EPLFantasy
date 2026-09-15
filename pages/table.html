@@ -1,7 +1,7 @@
 <!-- =====================================================
      TABLE & FIXTURES
-     One page: live table on top, fixtures below,
-     teams in alphabetical order.
+     One page: live table on top, fixtures below —
+     either by team (A to Z) or by gameweek.
 ===================================================== -->
 
 <div id="tableBanner"></div>
@@ -14,9 +14,24 @@
   <div id="leagueTableArea"></div>
 </section>
 
-<section>
+<section style="margin-bottom:0">
   <div class="sec-head">
-    <h2><span class="tag">A to Z</span>Fixtures by team</h2>
+    <h2><span class="tag">Fixtures</span>Who's playing who</h2>
   </div>
-  <div id="fixtureArea"></div>
+
+  <div class="slide-nav" style="--slide-accent:var(--cyan)">
+    <button class="snav active" data-slide="fx-team">By team</button>
+    <button class="snav" data-slide="fx-gw">By gameweek</button>
+  </div>
+
+  <div class="slides">
+    <div class="slide active" id="fx-team">
+      <div id="fixtureArea"></div>
+    </div>
+
+    <div class="slide" id="fx-gw">
+      <div class="gw-row" id="fxGwRow"></div>
+      <div id="fxGwArea"></div>
+    </div>
+  </div>
 </section>

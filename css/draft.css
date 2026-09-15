@@ -2,6 +2,32 @@
    DRAFT PAGE STYLES  ·  v2
 ===================================================== */
 
+/* ---------- chip bar — its own control, above the tabs,
+   so playing a chip is never buried inside a player's card ---------- */
+.chip-bar{
+  display:flex;align-items:center;justify-content:space-between;gap:10px;
+  margin-bottom:14px;padding:12px 15px;border-radius:14px;
+  background:var(--glass);border:1px solid var(--glass-brd);backdrop-filter:var(--blur);
+  box-shadow:inset 0 1px 0 var(--glass-hi);
+}
+.chip-bar-label{
+  font-family:var(--font-data);font-size:9.5px;letter-spacing:.1em;
+  text-transform:uppercase;color:var(--chalk-dim);
+}
+.chip-bar-label span{color:var(--chalk)}
+.chip-pill{
+  padding:8px 16px;border-radius:999px;border:1px solid var(--glass-brd);
+  background:rgba(255,255,255,.05);color:var(--chalk-dim);cursor:pointer;
+  font-family:var(--font-data);font-size:10px;font-weight:600;letter-spacing:.08em;
+  transition:border-color 160ms ease,color 160ms ease,background 160ms ease,transform 120ms var(--ease-out),box-shadow 160ms ease;
+}
+@media (hover:hover) and (pointer:fine){ .chip-pill:hover{border-color:var(--glass-brd-strong);color:var(--chalk)} }
+.chip-pill:active{transform:scale(.96)}
+.chip-pill.active{
+  border-color:rgba(182,255,61,.5);color:var(--lime);background:rgba(182,255,61,.12);
+  box-shadow:0 0 18px -6px rgba(182,255,61,.6);
+}
+
 /* ---------- flag label under the shirt ---------- */
 .chip .fstripe{
   font-family:var(--font-data);font-size:8px;font-weight:700;

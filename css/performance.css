@@ -35,6 +35,18 @@
   .ht-label{font-size:7px;letter-spacing:.08em}
 }
 
+/* ---------- rank trend card ---------- */
+.rank-trend-card{
+  background:var(--glass);border:1px solid var(--glass-brd);border-radius:14px;
+  padding:12px 15px 10px;margin:0 0 16px;backdrop-filter:var(--blur);
+  box-shadow:inset 0 1px 0 var(--glass-hi);
+}
+.rank-trend-head{
+  display:flex;justify-content:space-between;align-items:baseline;
+  gap:10px;margin-bottom:6px;flex-wrap:wrap;
+}
+.rank-trend-delta{font-family:var(--font-data);font-size:10px;font-weight:700;letter-spacing:.04em}
+
 /* ---------- form sparkline ---------- */
 .sparkline{
   width:100%;height:46px;display:block;
