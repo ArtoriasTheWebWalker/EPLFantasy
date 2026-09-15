@@ -126,22 +126,27 @@ export const CONFIG = {
 };
 
 /* club kit styles — used by the shirt graphic */
+/* Approximated from each club's actual 2026/27 home kit (colours and
+   pattern only — no crests, no sponsor marks, nothing copyrighted).
+   Researched 2026-09-15; a season's kits don't change mid-year, but a
+   design refresh the following season would need this list revisited. */
 export const KITS = {
   ARS:'linear-gradient(180deg,#EF0107 0 55%,#F5F7FA 55% 100%)',
   AVL:'linear-gradient(90deg,#95BFE5 0 32%,#670E36 32% 100%)',
-  BOU:'repeating-linear-gradient(90deg,#DA291C 0 6px,#000000 6px 12px)',
+  BOU:'repeating-linear-gradient(90deg,#DA291C 0 6px,#FFFFFF 6px 12px)',     // cherry red / white stripes this season, not red/black
   BRE:'repeating-linear-gradient(90deg,#E30613 0 6px,#FFFFFF 6px 12px)',
-  BHA:'repeating-linear-gradient(90deg,#0057B8 0 6px,#FFFFFF 6px 12px)',
+  BHA:'repeating-linear-gradient(90deg,#0057B8 0 9px,#FFFFFF 9px 11px)',    // narrower pinstripe, not an even-width stripe
   BUR:'linear-gradient(180deg,#6C1D45 0 70%,#99D6EA 70% 100%)',
   CHE:'#034694',
-  CRY:'repeating-linear-gradient(90deg,#1B458F 0 7px,#C4122E 7px 14px)',
+  CRY:'linear-gradient(135deg,#FFFFFF 0 42%,#1B458F 42% 48%,#C4122E 48% 54%,#FFFFFF 54% 100%)',  // white base + 1976-inspired diagonal sash, replaces last year's stripes
   EVE:'#003399',
   FUL:'linear-gradient(180deg,#FFFFFF 0 72%,#000000 72% 100%)',
+  HUL:'linear-gradient(180deg,#F5A623 0 78%,#000000 78% 100%)',            // added — missing from the previous list; amber/black, 1978-79 inspired
   IPS:'#3A64A3',
   LEE:'#FFFFFF',
   LEI:'#003090',
   LIV:'#C8102E',
-  MCI:'#6CABDD',
+  MCI:'linear-gradient(180deg,#6CABDD 0%,#FFFFFF 100%)',                    // this season's home kit is an explicit sky-blue-to-white gradient
   MUN:'#DA291C',
   NEW:'repeating-linear-gradient(90deg,#241F20 0 6px,#FFFFFF 6px 12px)',
   NFO:'#E53233',
@@ -149,7 +154,8 @@ export const KITS = {
   SUN:'repeating-linear-gradient(90deg,#EB172B 0 6px,#FFFFFF 6px 12px)',
   TOT:'linear-gradient(180deg,#FFFFFF 0 78%,#132257 78% 100%)',
   WHU:'linear-gradient(90deg,#7A263A 0 70%,#1BB1E7 70% 100%)',
-  WOL:'#FDB913'
+  WOL:'#FDB913',
+  COV:'repeating-linear-gradient(90deg,#78D0F2 0 7px,#FFFFFF 7px 14px)'     // added — missing from the previous list; Sky Blues, 1986-87-inspired stripes
 };
 
 export default CONFIG;
