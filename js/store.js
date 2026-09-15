@@ -606,8 +606,13 @@ export const Store = {
      FPL's mechanical correction.
   ================================================= */
   autoSubStarters(gw){
-    const starters = this.startersForGW(gw);
-    const bench    = this.benchForGW(gw);
+    return this._applyAutoSub(this.startersForGW(gw), this.benchForGW(gw), gw);
+  },
+
+  /* Shared core: given a starting XI and bench already resolved for
+     some context (a frozen past-GW snapshot, or today's working
+     squad), apply the substitution using real minutes from `gw`. */
+  _applyAutoSub(starters, bench, gw){
     const minutesOf = p => this.minutesIn(p, gw) ?? 0;
 
     let xi = [...starters];
@@ -640,6 +645,19 @@ export const Store = {
     }
 
     return xi;
+  },
+
+  /* The XI as it stands right now, on the working (not-yet-frozen)
+     squad — your picks, unless the current gameweek is already live
+     or finished and a bench player actually played while one of your
+     starters didn't. Before a gameweek has any real minutes recorded,
+     there's nothing to correct against, so this is just your picks
+     as-is; hasBeenPlayed() is the same signal snapshotLineup() uses
+     to know a week is no longer just a plan. */
+  liveStartingXI(){
+    const gw = this.currentGW;
+    if(!this.hasBeenPlayed(gw)) return this.starters();
+    return this._applyAutoSub(this.starters(), this.bench(), gw);
   },
 
   /* =================================================
@@ -1302,10 +1320,15 @@ export const Store = {
   /* =================================================
      TEAM DIFFERENTIAL EXPOSURE
 
-     A live read on your whole 15-man squad, not tied to any
-     one gameweek's actual result: how many of your players
-     are genuine differentials (under DIFFERENTIAL_CUTOFF%
-     owned), and the points swing that exposure represents.
+     A live read on your STARTING XI, not the bench and not
+     tied to any one gameweek's final result: how many of
+     your starters are genuine differentials (under
+     DIFFERENTIAL_CUTOFF% owned), and the points swing that
+     exposure represents. A bench player only counts once
+     he's actually in the XI — because you swapped him in, or
+     because the current gameweek is live/finished and he
+     played while one of your picked starters didn't
+     (liveStartingXI() handles both automatically).
 
      For each differential, his "edge" is (100% − his
      ownership) × his season points-per-game — the gap between
@@ -1324,8 +1347,8 @@ export const Store = {
   DIFFERENTIAL_CUTOFF: 10,   // % owned; below this counts as a differential
 
   teamDifferentialExposure(){
-    const squad = this.activeSquad();
-    const rows = squad.map(p => {
+    const xi = this.liveStartingXI();
+    const rows = xi.map(p => {
       const pool = this.pool.find(x => x.id === p.id);
       const ownership = pool ? pool.selected : 100;   // unknown → assume template, not a phantom differential
       const ppg = pool ? pool.ppg : 0;
@@ -1335,7 +1358,7 @@ export const Store = {
       .sort((a,b) => b.edge - a.edge);
 
     const swing = rows.reduce((s,r) => s + r.edge, 0);
-    return { cutoff: this.DIFFERENTIAL_CUTOFF, squadSize: squad.length, rows, swing };
+    return { cutoff: this.DIFFERENTIAL_CUTOFF, xiSize: xi.length, rows, swing };
   },
 
   /* =================================================

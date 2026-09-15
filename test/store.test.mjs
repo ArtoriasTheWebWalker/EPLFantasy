@@ -318,31 +318,74 @@ assert.deepEqual(Store.lineups[6].starterIds, [301, 303], 'a future week snapsho
   assert.equal(Store.freeTransfers, 1, 'a transfer under an active wildcard does not spend a free transfer');
 }
 
-/* --- Team differential exposure: a live read on the whole squad —
-   who's under the ownership cutoff, and the points swing that
-   exposure represents either way (same players, same edge, realised
-   or not). ------------------------------------------------------- */
+/* --- liveStartingXI: your picks as-is before a gameweek has any real
+   minutes recorded; auto-sub corrected once it does. ---------------*/
 {
+  const LIVE_GW = 60;
+  Store.currentGW = LIVE_GW;
+  Store.gwHistory = {};
+
+  const withMin = (id, pos, start, minutes) => ({
+    id, pos, teamId:1, outGW:null, start,
+    history: minutes == null ? [] : [{ gw:LIVE_GW, points: minutes>0?3:0, minutes }],
+  });
+
   Store.squad = [
-    { id:1001, teamId:1, pos:'GK',  outGW:null },   // template — 45% owned, excluded
-    { id:1002, teamId:1, pos:'DEF', outGW:null },   // differential — 3% owned
-    { id:1003, teamId:1, pos:'MID', outGW:null },   // differential — 8% owned
-    { id:1004, teamId:1, pos:'FWD', outGW:null },   // exactly at the cutoff — excluded, not "under" it
-    { id:1005, teamId:1, pos:'FWD', outGW:null },   // no pool entry at all — treated as template, not a phantom differential
+    withMin(2001, 'GK', true, null),   // no history yet at all — nothing has kicked off
+    withMin(2002, 'GK', false, null),
+    withMin(2003, 'DEF', true, null),
+    withMin(2004, 'DEF', false, null),
+  ];
+
+  assert.equal(Store.hasBeenPlayed(LIVE_GW), false, 'no history entries anywhere for this GW yet');
+  const before = Store.liveStartingXI();
+  assert.deepEqual(before.map(p=>p.id).sort(), [2001,2003], 'before kickoff, just your picks — no correction attempted');
+
+  /* now the gameweek is live: starting GK blanks, bench GK played */
+  Store.squad = [
+    withMin(2001, 'GK', true, 0),
+    withMin(2002, 'GK', false, 90),
+    withMin(2003, 'DEF', true, 90),
+    withMin(2004, 'DEF', false, 90),
+  ];
+  assert.equal(Store.hasBeenPlayed(LIVE_GW), true);
+  const live = Store.liveStartingXI();
+  assert.ok(live.some(p=>p.id===2002) && !live.some(p=>p.id===2001),
+    'once live, a blanking starter is replaced by the bench player who actually played');
+}
+
+/* --- Team differential exposure: a live read on the STARTING XI
+   only — the bench never counts unless a swap, or a live auto-sub,
+   has actually put him in the XI (see liveStartingXI above). Who's
+   under the ownership cutoff, and the points swing that exposure
+   represents either way (same players, same edge, realised or not).*/
+{
+  Store.currentGW = 61;   // fresh GW, no history recorded — plain picks, no auto-sub in play
+  Store.gwHistory = {};
+
+  Store.squad = [
+    { id:1001, teamId:1, pos:'GK',  outGW:null, start:true,  history:[] },   // template — 45% owned, excluded
+    { id:1002, teamId:1, pos:'DEF', outGW:null, start:true,  history:[] },   // differential — 3% owned, starting
+    { id:1003, teamId:1, pos:'MID', outGW:null, start:true,  history:[] },   // differential — 8% owned, starting
+    { id:1004, teamId:1, pos:'FWD', outGW:null, start:true,  history:[] },   // exactly at the cutoff — excluded, not "under" it
+    { id:1005, teamId:1, pos:'FWD', outGW:null, start:true,  history:[] },   // no pool entry at all — treated as template
+    { id:1006, teamId:1, pos:'MID', outGW:null, start:false, history:[] },   // 2% owned but BENCHED — must not count
   ];
   Store.pool = [
     { id:1001, selected:45, ppg:5 },
     { id:1002, selected:3,  ppg:4 },
     { id:1003, selected:8,  ppg:6 },
     { id:1004, selected:10, ppg:7 },
+    { id:1006, selected:2,  ppg:9 },
     /* 1005 deliberately missing */
   ];
 
   const exp = Store.teamDifferentialExposure();
-  assert.equal(exp.squadSize, 5);
+  assert.equal(exp.xiSize, 5, 'the bench player is not part of the XI size either');
   assert.equal(exp.cutoff, 10);
-  assert.equal(exp.rows.length, 2, 'only the two players strictly under the cutoff count as differentials');
+  assert.equal(exp.rows.length, 2, 'only the two STARTING players strictly under the cutoff count');
   assert.deepEqual(exp.rows.map(r=>r.player.id), [1003, 1002], 'sorted by edge, largest first');
+  assert.ok(!exp.rows.some(r=>r.player.id===1006), 'the low-owned bench player is excluded even though he would otherwise qualify');
 
   const edge1002 = (1 - 3/100) * 4;
   const edge1003 = (1 - 8/100) * 6;
@@ -351,4 +394,4 @@ assert.deepEqual(Store.lineups[6].starterIds, [301, 303], 'a future week snapsho
   assert.ok(Math.abs(exp.swing - (edge1002 + edge1003)) < 1e-9, 'the swing is the sum of every differential\'s edge');
 }
 
-console.log('ok — 71 assertions passed');
+console.log('ok — 76 assertions passed');

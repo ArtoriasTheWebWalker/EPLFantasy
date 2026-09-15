@@ -45,11 +45,13 @@ const Draft = {
   },
 
   /* =================================================
-     DIFFERENTIAL EXPOSURE — a live read on the whole
-     15-man squad, not any one gameweek's result: how many
-     players are under Store.DIFFERENTIAL_CUTOFF% owned, and
-     the points swing that exposure represents either way.
-     See Store.teamDifferentialExposure for the maths.
+     DIFFERENTIAL EXPOSURE — a live read on your starting
+     XI (bench excluded, unless a swap or a live auto-sub
+     has moved someone into it), not tied to any one
+     gameweek's final result: how many starters are under
+     Store.DIFFERENTIAL_CUTOFF% owned, and the points swing
+     that exposure represents either way. See
+     Store.teamDifferentialExposure / Store.liveStartingXI.
   ================================================= */
   renderOwnershipCard(){
     const el = document.getElementById('ownershipCard');
@@ -67,7 +69,7 @@ const Draft = {
     const more = exp.rows.length > 6 ? `<div class="hint-line">+${exp.rows.length-6} more</div>` : '';
 
     el.innerHTML = `
-      <div class="mini-title">Differential exposure &middot; ${exp.rows.length} of ${exp.squadSize} players under ${exp.cutoff}% owned</div>
+      <div class="mini-title">Differential exposure &middot; ${exp.rows.length} of ${exp.xiSize} starters under ${exp.cutoff}% owned</div>
       <div class="hero-stats" style="margin-bottom:0;grid-template-columns:repeat(2,1fr)">
         <div class="hero-tile" style="--ha:var(--lime)">
           <div class="ht-label">If they perform normally</div>
