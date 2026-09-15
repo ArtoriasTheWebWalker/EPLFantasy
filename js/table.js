@@ -4,8 +4,8 @@
    The live table drives everything else in the app:
    a team's league position becomes its difficulty tier,
    and those tiers colour the fixture runs shown on the
-   Draft page. One page, table first, fixtures below,
-   teams A to Z.
+   Draft page. Fixtures come first — by team (A to Z) or
+   by gameweek — with the table itself as a third tab.
 ===================================================== */
 
 import { CONFIG, KITS } from './config.js';
@@ -20,9 +20,9 @@ const TablePage = {
 
   render(){
     document.getElementById('tableBanner').innerHTML = apiBanner(Store.apiState || 'offline');
-    this.renderTable();
     this.renderFixtures();
     this.renderByGW();
+    this.renderTable();
   },
 
   /* =================================================

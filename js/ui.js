@@ -46,7 +46,10 @@ export function wireSlideNav(rootSelector){
   /* ---- swipe between tabs on touch ----
      Only tracks a gesture that starts on "empty" background — a chip,
      button, select, textarea or link swallows it instead, so this never
-     fights the pitch's own drag-and-drop or a normal tap. */
+     fights the pitch's own drag-and-drop or a normal tap. Also skips
+     anything that horizontally scrolls on its own (.fix-strip, .gw-row)
+     — a swipe meant to scroll a team's fixture run or the gameweek pill
+     row used to get eaten as a tab-switch instead. */
   const slides = document.querySelector(`${rootSelector} .slides`);
   if(slides && !slides.dataset.swipeWired){
     slides.dataset.swipeWired = '1';
@@ -54,7 +57,7 @@ export function wireSlideNav(rootSelector){
 
     slides.addEventListener('touchstart', e=>{
       if(e.touches.length !== 1){ tracking = false; return; }
-      if(e.target.closest('.chip, button, select, textarea, input, a')){ tracking = false; return; }
+      if(e.target.closest('.chip, button, select, textarea, input, a, .fix-strip, .gw-row')){ tracking = false; return; }
       sx = e.touches[0].clientX; sy = e.touches[0].clientY; tracking = true;
     }, { passive:true });
 

@@ -1,37 +1,43 @@
 <!-- =====================================================
      TABLE & FIXTURES
-     One page: live table on top, fixtures below —
-     either by team (A to Z) or by gameweek.
+     Fixtures first — by team or by gameweek — with the
+     league table as a third tab alongside them.
 ===================================================== -->
 
 <div id="tableBanner"></div>
 
-<section>
-  <div class="sec-head">
-    <h2><span class="tag">Live · updates daily</span>Premier League table</h2>
-    <span class="hint" id="tableStamp"></span>
-  </div>
-  <div id="leagueTableArea"></div>
-</section>
+<div class="slide-nav" style="--slide-accent:var(--cyan)">
+  <button class="snav active" data-slide="fx-team">By team</button>
+  <button class="snav" data-slide="fx-gw">By gameweek</button>
+  <button class="snav" data-slide="tbl-table">Table</button>
+</div>
 
-<section style="margin-bottom:0">
-  <div class="sec-head">
-    <h2><span class="tag">Fixtures</span>Who's playing who</h2>
-  </div>
+<div class="slides">
 
-  <div class="slide-nav" style="--slide-accent:var(--cyan)">
-    <button class="snav active" data-slide="fx-team">By team</button>
-    <button class="snav" data-slide="fx-gw">By gameweek</button>
-  </div>
-
-  <div class="slides">
-    <div class="slide active" id="fx-team">
-      <div id="fixtureArea"></div>
+  <!-- ---------- BY TEAM ---------- -->
+  <div class="slide active" id="fx-team">
+    <div class="sec-head">
+      <h2><span class="tag">A to Z</span>Fixtures by team</h2>
     </div>
-
-    <div class="slide" id="fx-gw">
-      <div class="gw-row" id="fxGwRow"></div>
-      <div id="fxGwArea"></div>
-    </div>
+    <div id="fixtureArea"></div>
   </div>
-</section>
+
+  <!-- ---------- BY GAMEWEEK ---------- -->
+  <div class="slide" id="fx-gw">
+    <div class="sec-head">
+      <h2><span class="tag">This week</span>Who's playing who</h2>
+    </div>
+    <div class="gw-row" id="fxGwRow"></div>
+    <div id="fxGwArea"></div>
+  </div>
+
+  <!-- ---------- TABLE ---------- -->
+  <div class="slide" id="tbl-table">
+    <div class="sec-head">
+      <h2><span class="tag">Live · updates daily</span>Premier League table</h2>
+      <span class="hint" id="tableStamp"></span>
+    </div>
+    <div id="leagueTableArea"></div>
+  </div>
+
+</div>
