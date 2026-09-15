@@ -1343,6 +1343,13 @@ export const Store = {
      that's the same amount you'd miss out on. Both directions
      use the same players and the same edge — it's the size of
      what's riding on them, not two different predictions.
+
+     Each differential also carries `alt` — the highest-owned
+     player at his position not currently in the squad, i.e.
+     the template pick he's being chosen over — and `altCost`,
+     that player's own ownership x ppg. That's the flip side:
+     not what the differential could win you, but roughly what
+     the template alternative could cost you by comparison.
   ================================================= */
   DIFFERENTIAL_CUTOFF: 10,   // % owned; below this counts as a differential
 
@@ -1356,6 +1363,21 @@ export const Store = {
       return { player:p, ownership, ppg, edge };
     }).filter(r => r.ownership < this.DIFFERENTIAL_CUTOFF)
       .sort((a,b) => b.edge - a.edge);
+
+    /* For each differential, the highest-owned player at his position
+       that isn't in the squad — the template pick being passed over
+       for him. His own edge formula run in reverse (ownership x ppg,
+       not (100%-ownership) x ppg) says roughly how much of the field's
+       going rate on that position is being given up by not holding
+       him instead. */
+    const ownedIds = new Set(this.activeSquad().map(p => p.id));
+    rows.forEach(r => {
+      const alt = this.pool
+        .filter(x => x.pos === r.player.pos && !ownedIds.has(x.id))
+        .sort((a,b) => b.selected - a.selected)[0] || null;
+      r.alt = alt;
+      r.altCost = alt ? (alt.selected/100) * alt.ppg : 0;
+    });
 
     const swing = rows.reduce((s,r) => s + r.edge, 0);
     return { cutoff: this.DIFFERENTIAL_CUTOFF, xiSize: xi.length, rows, swing };

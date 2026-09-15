@@ -17,7 +17,7 @@
    so old entries get swept on the next activate.
 ===================================================== */
 
-const CACHE_NAME = 'fplc-shell-v1';
+const CACHE_NAME = 'fplc-shell-v2';   // v2: forces a clean cache after the Table page restructure
 
 const SHELL = [
   './',

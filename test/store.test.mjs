@@ -377,6 +377,10 @@ assert.deepEqual(Store.lineups[6].starterIds, [301, 303], 'a future week snapsho
     { id:1003, selected:8,  ppg:6 },
     { id:1004, selected:10, ppg:7 },
     { id:1006, selected:2,  ppg:9 },
+    /* unowned alternatives — not in Store.squad at all */
+    { id:2001, pos:'MID', selected:60, ppg:10 },   // highest-owned unowned MID — should win as 1003's alt
+    { id:2002, pos:'MID', selected:20, ppg:5  },   // a lower-owned MID — must NOT be picked over 2001
+    { id:2003, pos:'DEF', selected:55, ppg:8  },   // the only unowned DEF — should win as 1002's alt
     /* 1005 deliberately missing */
   ];
 
@@ -392,6 +396,13 @@ assert.deepEqual(Store.lineups[6].starterIds, [301, 303], 'a future week snapsho
   assert.ok(Math.abs(exp.rows[0].edge - edge1003) < 1e-9, "MID's edge is (100% - 8%) x his 6 ppg");
   assert.ok(Math.abs(exp.rows[1].edge - edge1002) < 1e-9, "DEF's edge is (100% - 3%) x his 4 ppg");
   assert.ok(Math.abs(exp.swing - (edge1002 + edge1003)) < 1e-9, 'the swing is the sum of every differential\'s edge');
+
+  const midRow = exp.rows.find(r=>r.player.id===1003);
+  const defRow = exp.rows.find(r=>r.player.id===1002);
+  assert.equal(midRow.alt.id, 2001, "the MID differential's alt is the HIGHEST-owned unowned MID, not just any unowned MID");
+  assert.equal(defRow.alt.id, 2003, "the DEF differential's alt is the only unowned DEF");
+  assert.ok(Math.abs(midRow.altCost - (60/100)*10) < 1e-9, "alt cost is the alternative's own ownership x ppg");
+  assert.ok(Math.abs(defRow.altCost - (55/100)*8) < 1e-9);
 }
 
-console.log('ok — 76 assertions passed');
+console.log('ok — 80 assertions passed');

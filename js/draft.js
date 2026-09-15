@@ -65,7 +65,11 @@ const Draft = {
       <div class="break-row">
         <span>${r.player.name} <span class="hint-line" style="margin:0;display:inline">(${r.ownership.toFixed(1)}% owned, ${r.ppg.toFixed(1)} pts/gm avg)</span></span>
         <span style="color:var(--lime)">+${r.edge.toFixed(1)}</span>
-      </div>`).join('');
+      </div>
+      ${r.alt ? `<div class="hint-line" style="display:flex;justify-content:space-between;gap:8px;margin:-4px 0 8px">
+        <span>vs. holding ${r.alt.name} instead (${r.alt.selected.toFixed(1)}% owned)</span>
+        <span style="color:var(--red);flex:0 0 auto">&minus;${r.altCost.toFixed(1)}</span>
+      </div>` : ''}`).join('');
     const more = exp.rows.length > 6 ? `<div class="hint-line">+${exp.rows.length-6} more</div>` : '';
 
     el.innerHTML = `
@@ -83,7 +87,6 @@ const Draft = {
       <details class="m-disclose" style="margin-top:10px">
         <summary>Which players this comes from</summary>
         ${rowsHTML}${more}
-        <div class="hint-line" style="margin-top:10px">Each figure is (100% &minus; his ownership) &times; his season points-per-game — the gap between what a normal week from him is worth to you and what almost nobody else in the game gets from that same week. Both numbers above use the same players and the same edge; it's the size of what's riding on them, realised or not, not two separate predictions.</div>
       </details>`;
   },
 
