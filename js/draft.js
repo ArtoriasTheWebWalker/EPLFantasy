@@ -45,48 +45,43 @@ const Draft = {
   },
 
   /* =================================================
-     OWNERSHIP RISK / REWARD — a rough placeholder for
-     "how much are my differentials from the crowd
-     actually costing or earning me". See Store.soldPlayerRisk
-     / Store.differentialReward for the maths and its caveats.
+     DIFFERENTIAL EXPOSURE — a live read on the whole
+     15-man squad, not any one gameweek's result: how many
+     players are under Store.DIFFERENTIAL_CUTOFF% owned, and
+     the points swing that exposure represents either way.
+     See Store.teamDifferentialExposure for the maths.
   ================================================= */
   renderOwnershipCard(){
     const el = document.getElementById('ownershipCard');
     if(!el) return;
-    if(!Store.pool.length){ el.innerHTML = ''; return; }
+    if(!Store.pool.length || !Store.squad.length){ el.innerHTML = ''; return; }
 
-    const risk   = Store.soldPlayerRisk();
-    const reward = Store.differentialReward();
+    const exp = Store.teamDifferentialExposure();
+    if(!exp.rows.length){ el.innerHTML = ''; return; }
 
-    if(!risk.rows.length && !reward.rows.length){ el.innerHTML = ''; return; }
-
-    const row = (r, positive) => `
+    const rowsHTML = exp.rows.slice(0,6).map(r => `
       <div class="break-row">
-        <span>${r.player.name} <span class="hint-line" style="margin:0;display:inline">(${r.ownership.toFixed(1)}% owned, ${r.pointsSince} pts)</span></span>
-        <span style="color:var(--${positive?'lime':'red'})">${positive?'+':'−'}${Math.abs(positive?r.reward:r.risk).toFixed(1)}</span>
-      </div>`;
-
-    const riskRows   = risk.rows.slice(0,5).map(r=>row(r,false)).join('');
-    const rewardRows = reward.rows.slice(0,5).map(r=>row(r,true)).join('');
-    const riskMore    = risk.rows.length   > 5 ? `<div class="hint-line">+${risk.rows.length-5} more</div>`   : '';
-    const rewardMore  = reward.rows.length > 5 ? `<div class="hint-line">+${reward.rows.length-5} more</div>` : '';
+        <span>${r.player.name} <span class="hint-line" style="margin:0;display:inline">(${r.ownership.toFixed(1)}% owned, ${r.ppg.toFixed(1)} pts/gm avg)</span></span>
+        <span style="color:var(--lime)">+${r.edge.toFixed(1)}</span>
+      </div>`).join('');
+    const more = exp.rows.length > 6 ? `<div class="hint-line">+${exp.rows.length-6} more</div>` : '';
 
     el.innerHTML = `
+      <div class="mini-title">Differential exposure &middot; ${exp.rows.length} of ${exp.squadSize} players under ${exp.cutoff}% owned</div>
       <div class="hero-stats" style="margin-bottom:0;grid-template-columns:repeat(2,1fr)">
-        <div class="hero-tile" style="--ha:var(--red)">
-          <div class="ht-label">Sold-player risk</div>
-          <div class="ht-val">&minus;${risk.total.toFixed(1)}</div>
-        </div>
         <div class="hero-tile" style="--ha:var(--lime)">
-          <div class="ht-label">Differential reward</div>
-          <div class="ht-val">+${reward.total.toFixed(1)}</div>
+          <div class="ht-label">If they perform normally</div>
+          <div class="ht-val">+${exp.swing.toFixed(1)}</div>
+        </div>
+        <div class="hero-tile" style="--ha:var(--red)">
+          <div class="ht-label">If they blank instead</div>
+          <div class="ht-val">&minus;${exp.swing.toFixed(1)}</div>
         </div>
       </div>
       <details class="m-disclose" style="margin-top:10px">
-        <summary>What's driving this</summary>
-        ${riskRows ? `<div class="mini-title" style="margin-top:2px">Sold, and hurting</div>${riskRows}${riskMore}` : ''}
-        ${rewardRows ? `<div class="mini-title" style="margin-top:${riskRows?'14px':'2px'}">Owned, and paying off</div>${rewardRows}${rewardMore}` : ''}
-        <div class="hint-line" style="margin-top:10px">Approximate — uses today's ownership applied back across each player's whole run rather than what it actually was at the time, so it's most trustworthy for a recent sale and shakier for an old one. Risk counts every point scored since a sale; reward only counts weeks he actually started for you.</div>
+        <summary>Which players this comes from</summary>
+        ${rowsHTML}${more}
+        <div class="hint-line" style="margin-top:10px">Each figure is (100% &minus; his ownership) &times; his season points-per-game — the gap between what a normal week from him is worth to you and what almost nobody else in the game gets from that same week. Both numbers above use the same players and the same edge; it's the size of what's riding on them, realised or not, not two separate predictions.</div>
       </details>`;
   },
 

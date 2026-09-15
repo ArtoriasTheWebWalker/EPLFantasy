@@ -1300,66 +1300,42 @@ export const Store = {
   },
 
   /* =================================================
-     OWNERSHIP RISK / REWARD
+     TEAM DIFFERENTIAL EXPOSURE
 
-     How much your transfer decisions are costing or earning
-     you relative to the rest of the field, using ownership
-     as the weight. Two symmetric ideas:
+     A live read on your whole 15-man squad, not tied to any
+     one gameweek's actual result: how many of your players
+     are genuine differentials (under DIFFERENTIAL_CUTOFF%
+     owned), and the points swing that exposure represents.
 
-     - Sell a player owned by O% of managers, and he keeps
-       scoring: that O% of the field is banking points you
-       aren't, so you fall behind the average manager by
-       roughly O% of whatever he's scored since he left.
-     - Hold a player owned by only O%, and he scores: almost
-       nobody else gets those points, so you pull AHEAD of
-       the average manager by roughly (100-O)% of what he's
-       scored while actually starting for you.
+     For each differential, his "edge" is (100% − his
+     ownership) × his season points-per-game — the gap between
+     what you'd get from him at a normal week and what almost
+     nobody else in the game would get from the same week,
+     since so few managers hold him.
 
-     Explicitly approximate, and said so in the UI: the FPL
-     API has no historical per-gameweek ownership, only the
-     current snapshot, so a sale from ten gameweeks ago is
-     weighted by today's ownership, not what it was then. Good
-     enough for "did that recent sale burn me", much shakier
-     the further back a transfer sits — which is exactly why
-     this is a rough placeholder, not a scoreboard.
+     Summed across every differential, that edge is shown as
+     a symmetric pair: if they all played to their normal
+     level this week, that's roughly how far ahead of an
+     average manager you'd land; if they all blanked instead,
+     that's the same amount you'd miss out on. Both directions
+     use the same players and the same edge — it's the size of
+     what's riding on them, not two different predictions.
   ================================================= */
+  DIFFERENTIAL_CUTOFF: 10,   // % owned; below this counts as a differential
 
-  /* every player ever sold, and the points he's scored since
-     leaving, weighted by how much of the field still has him */
-  soldPlayerRisk(){
-    const sold = this.squad.filter(p => p.outGW != null);
-    const rows = sold.map(p => {
+  teamDifferentialExposure(){
+    const squad = this.activeSquad();
+    const rows = squad.map(p => {
       const pool = this.pool.find(x => x.id === p.id);
-      const ownership = pool ? pool.selected : 0;
-      const pointsSince = (p.history || [])
-        .filter(h => h.gw >= p.outGW)
-        .reduce((s,h) => s + h.points, 0);
-      return { player:p, ownership, pointsSince, risk: ownership/100 * pointsSince };
-    }).filter(r => r.pointsSince > 0)
-      .sort((a,b) => b.risk - a.risk);
+      const ownership = pool ? pool.selected : 100;   // unknown → assume template, not a phantom differential
+      const ppg = pool ? pool.ppg : 0;
+      const edge = (1 - ownership/100) * ppg;
+      return { player:p, ownership, ppg, edge };
+    }).filter(r => r.ownership < this.DIFFERENTIAL_CUTOFF)
+      .sort((a,b) => b.edge - a.edge);
 
-    return { total: rows.reduce((s,r) => s + r.risk, 0), rows };
-  },
-
-  /* every currently-owned player, and the points he's scored
-     while actually starting for you since he joined, weighted
-     by how little of the field shares him */
-  differentialReward(){
-    const rows = this.activeSquad().map(p => {
-      const pool = this.pool.find(x => x.id === p.id);
-      const ownership = pool ? pool.selected : 0;
-      const since = p.inGW || 1;
-      let pointsSince = 0;
-      for(let gw = since; gw <= this.currentGW; gw++){
-        if(this.startersForGW(gw).some(x => x.id === p.id)){
-          pointsSince += this.pointsIn(p, gw) ?? 0;
-        }
-      }
-      return { player:p, ownership, pointsSince, reward: (1 - ownership/100) * pointsSince };
-    }).filter(r => r.pointsSince > 0)
-      .sort((a,b) => b.reward - a.reward);
-
-    return { total: rows.reduce((s,r) => s + r.reward, 0), rows };
+    const swing = rows.reduce((s,r) => s + r.edge, 0);
+    return { cutoff: this.DIFFERENTIAL_CUTOFF, squadSize: squad.length, rows, swing };
   },
 
   /* =================================================

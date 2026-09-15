@@ -318,60 +318,37 @@ assert.deepEqual(Store.lineups[6].starterIds, [301, 303], 'a future week snapsho
   assert.equal(Store.freeTransfers, 1, 'a transfer under an active wildcard does not spend a free transfer');
 }
 
-/* --- Ownership risk/reward: sold-player exposure and differential
-   payoff, both weighted by current ownership as the (approximate)
-   stand-in for ownership at the time. -------------------------------*/
+/* --- Team differential exposure: a live read on the whole squad —
+   who's under the ownership cutoff, and the points swing that
+   exposure represents either way (same players, same edge, realised
+   or not). ------------------------------------------------------- */
 {
-  /* sold player: only points from the week he left onward count */
-  Store.pool = [{ id: 901, selected: 40 }];
   Store.squad = [
-    { id: 901, teamId:1, pos:'MID', price:8, outGW:5, start:false, history: [
-      { gw:3, points:10 },   // before he left — must not count
-      { gw:5, points:6  },   // the week he left — counts
-      { gw:6, points:12 },   // after leaving — counts
-    ] },
+    { id:1001, teamId:1, pos:'GK',  outGW:null },   // template — 45% owned, excluded
+    { id:1002, teamId:1, pos:'DEF', outGW:null },   // differential — 3% owned
+    { id:1003, teamId:1, pos:'MID', outGW:null },   // differential — 8% owned
+    { id:1004, teamId:1, pos:'FWD', outGW:null },   // exactly at the cutoff — excluded, not "under" it
+    { id:1005, teamId:1, pos:'FWD', outGW:null },   // no pool entry at all — treated as template, not a phantom differential
   ];
-  const risk = Store.soldPlayerRisk();
-  assert.equal(risk.rows.length, 1);
-  assert.equal(risk.rows[0].pointsSince, 18, 'only points from outGW onward count');
-  assert.equal(risk.rows[0].risk, 0.4 * 18, 'weighted by his ownership, not the field he left behind');
-  assert.equal(risk.total, 7.2);
+  Store.pool = [
+    { id:1001, selected:45, ppg:5 },
+    { id:1002, selected:3,  ppg:4 },
+    { id:1003, selected:8,  ppg:6 },
+    { id:1004, selected:10, ppg:7 },
+    /* 1005 deliberately missing */
+  ];
 
-  /* a sold player who never scores again contributes nothing, not a
-     zero-value row cluttering the list */
-  Store.squad = [
-    { id: 902, teamId:1, pos:'DEF', price:5, outGW:5, start:false,
-      history:[{ gw:5, points:0 }, { gw:6, points:0 }] },
-  ];
-  Store.pool = [{ id:902, selected:50 }];
-  const riskZero = Store.soldPlayerRisk();
-  assert.equal(riskZero.rows.length, 0, 'no points since leaving means no risk row at all');
-  assert.equal(riskZero.total, 0);
+  const exp = Store.teamDifferentialExposure();
+  assert.equal(exp.squadSize, 5);
+  assert.equal(exp.cutoff, 10);
+  assert.equal(exp.rows.length, 2, 'only the two players strictly under the cutoff count as differentials');
+  assert.deepEqual(exp.rows.map(r=>r.player.id), [1003, 1002], 'sorted by edge, largest first');
 
-  /* differential reward: only weeks he actually STARTED for you count,
-     and only from the gameweek he joined onward */
-  Store.currentGW = 6;
-  Store.pool = [{ id:903, selected:5 }];
-  Store.squad = [
-    { id:903, teamId:1, pos:'FWD', price:6, inGW:4, outGW:null, start:true, history:[
-      { gw:3, points:20 },  // before he joined — must not count
-      { gw:4, points:8  },
-      { gw:5, points:15 },  // benched this week — must not count
-      { gw:6, points:2  },
-    ] },
-    { id:904, teamId:2, pos:'FWD', price:5, inGW:null, outGW:null, start:false, history:[] },
-  ];
-  Store.lineups = {
-    4: { memberIds:[903,904], starterIds:[903] },
-    5: { memberIds:[903,904], starterIds:[904] },   // 903 benched this week
-    6: { memberIds:[903,904], starterIds:[903] },
-  };
-  const reward = Store.differentialReward();
-  assert.equal(reward.rows.length, 1, 'the never-scoring squadmate contributes no row');
-  assert.equal(reward.rows[0].player.id, 903);
-  assert.equal(reward.rows[0].pointsSince, 10, 'gw4 (8) + gw6 (2) only — not the pre-transfer gw3, not the benched gw5');
-  assert.equal(reward.rows[0].reward, 0.95 * 10, 'weighted by how little of the field shares him');
-  assert.equal(reward.total, 9.5);
+  const edge1002 = (1 - 3/100) * 4;
+  const edge1003 = (1 - 8/100) * 6;
+  assert.ok(Math.abs(exp.rows[0].edge - edge1003) < 1e-9, "MID's edge is (100% - 8%) x his 6 ppg");
+  assert.ok(Math.abs(exp.rows[1].edge - edge1002) < 1e-9, "DEF's edge is (100% - 3%) x his 4 ppg");
+  assert.ok(Math.abs(exp.swing - (edge1002 + edge1003)) < 1e-9, 'the swing is the sum of every differential\'s edge');
 }
 
-console.log('ok — 75 assertions passed');
+console.log('ok — 71 assertions passed');
