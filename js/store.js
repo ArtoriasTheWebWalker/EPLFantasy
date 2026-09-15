@@ -1300,6 +1300,69 @@ export const Store = {
   },
 
   /* =================================================
+     OWNERSHIP RISK / REWARD
+
+     How much your transfer decisions are costing or earning
+     you relative to the rest of the field, using ownership
+     as the weight. Two symmetric ideas:
+
+     - Sell a player owned by O% of managers, and he keeps
+       scoring: that O% of the field is banking points you
+       aren't, so you fall behind the average manager by
+       roughly O% of whatever he's scored since he left.
+     - Hold a player owned by only O%, and he scores: almost
+       nobody else gets those points, so you pull AHEAD of
+       the average manager by roughly (100-O)% of what he's
+       scored while actually starting for you.
+
+     Explicitly approximate, and said so in the UI: the FPL
+     API has no historical per-gameweek ownership, only the
+     current snapshot, so a sale from ten gameweeks ago is
+     weighted by today's ownership, not what it was then. Good
+     enough for "did that recent sale burn me", much shakier
+     the further back a transfer sits — which is exactly why
+     this is a rough placeholder, not a scoreboard.
+  ================================================= */
+
+  /* every player ever sold, and the points he's scored since
+     leaving, weighted by how much of the field still has him */
+  soldPlayerRisk(){
+    const sold = this.squad.filter(p => p.outGW != null);
+    const rows = sold.map(p => {
+      const pool = this.pool.find(x => x.id === p.id);
+      const ownership = pool ? pool.selected : 0;
+      const pointsSince = (p.history || [])
+        .filter(h => h.gw >= p.outGW)
+        .reduce((s,h) => s + h.points, 0);
+      return { player:p, ownership, pointsSince, risk: ownership/100 * pointsSince };
+    }).filter(r => r.pointsSince > 0)
+      .sort((a,b) => b.risk - a.risk);
+
+    return { total: rows.reduce((s,r) => s + r.risk, 0), rows };
+  },
+
+  /* every currently-owned player, and the points he's scored
+     while actually starting for you since he joined, weighted
+     by how little of the field shares him */
+  differentialReward(){
+    const rows = this.activeSquad().map(p => {
+      const pool = this.pool.find(x => x.id === p.id);
+      const ownership = pool ? pool.selected : 0;
+      const since = p.inGW || 1;
+      let pointsSince = 0;
+      for(let gw = since; gw <= this.currentGW; gw++){
+        if(this.startersForGW(gw).some(x => x.id === p.id)){
+          pointsSince += this.pointsIn(p, gw) ?? 0;
+        }
+      }
+      return { player:p, ownership, pointsSince, reward: (1 - ownership/100) * pointsSince };
+    }).filter(r => r.pointsSince > 0)
+      .sort((a,b) => b.reward - a.reward);
+
+    return { total: rows.reduce((s,r) => s + r.reward, 0), rows };
+  },
+
+  /* =================================================
      FIXTURES / TIERS
   ================================================= */
 

@@ -39,8 +39,55 @@ const Draft = {
   render(){
     document.getElementById('draftBanner').innerHTML = apiBanner(Store.apiState || 'offline');
     this.renderChipBar();
+    this.renderOwnershipCard();
     this.renderPitch();
     this.renderCandidates();
+  },
+
+  /* =================================================
+     OWNERSHIP RISK / REWARD — a rough placeholder for
+     "how much are my differentials from the crowd
+     actually costing or earning me". See Store.soldPlayerRisk
+     / Store.differentialReward for the maths and its caveats.
+  ================================================= */
+  renderOwnershipCard(){
+    const el = document.getElementById('ownershipCard');
+    if(!el) return;
+    if(!Store.pool.length){ el.innerHTML = ''; return; }
+
+    const risk   = Store.soldPlayerRisk();
+    const reward = Store.differentialReward();
+
+    if(!risk.rows.length && !reward.rows.length){ el.innerHTML = ''; return; }
+
+    const row = (r, positive) => `
+      <div class="break-row">
+        <span>${r.player.name} <span class="hint-line" style="margin:0;display:inline">(${r.ownership.toFixed(1)}% owned, ${r.pointsSince} pts)</span></span>
+        <span style="color:var(--${positive?'lime':'red'})">${positive?'+':'−'}${Math.abs(positive?r.reward:r.risk).toFixed(1)}</span>
+      </div>`;
+
+    const riskRows   = risk.rows.slice(0,5).map(r=>row(r,false)).join('');
+    const rewardRows = reward.rows.slice(0,5).map(r=>row(r,true)).join('');
+    const riskMore    = risk.rows.length   > 5 ? `<div class="hint-line">+${risk.rows.length-5} more</div>`   : '';
+    const rewardMore  = reward.rows.length > 5 ? `<div class="hint-line">+${reward.rows.length-5} more</div>` : '';
+
+    el.innerHTML = `
+      <div class="hero-stats" style="margin-bottom:0;grid-template-columns:repeat(2,1fr)">
+        <div class="hero-tile" style="--ha:var(--red)">
+          <div class="ht-label">Sold-player risk</div>
+          <div class="ht-val">&minus;${risk.total.toFixed(1)}</div>
+        </div>
+        <div class="hero-tile" style="--ha:var(--lime)">
+          <div class="ht-label">Differential reward</div>
+          <div class="ht-val">+${reward.total.toFixed(1)}</div>
+        </div>
+      </div>
+      <details class="m-disclose" style="margin-top:10px">
+        <summary>What's driving this</summary>
+        ${riskRows ? `<div class="mini-title" style="margin-top:2px">Sold, and hurting</div>${riskRows}${riskMore}` : ''}
+        ${rewardRows ? `<div class="mini-title" style="margin-top:${riskRows?'14px':'2px'}">Owned, and paying off</div>${rewardRows}${rewardMore}` : ''}
+        <div class="hint-line" style="margin-top:10px">Approximate — uses today's ownership applied back across each player's whole run rather than what it actually was at the time, so it's most trustworthy for a recent sale and shakier for an old one. Risk counts every point scored since a sale; reward only counts weeks he actually started for you.</div>
+      </details>`;
   },
 
   /* =================================================

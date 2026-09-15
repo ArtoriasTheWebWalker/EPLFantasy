@@ -318,4 +318,60 @@ assert.deepEqual(Store.lineups[6].starterIds, [301, 303], 'a future week snapsho
   assert.equal(Store.freeTransfers, 1, 'a transfer under an active wildcard does not spend a free transfer');
 }
 
-console.log('ok — 64 assertions passed');
+/* --- Ownership risk/reward: sold-player exposure and differential
+   payoff, both weighted by current ownership as the (approximate)
+   stand-in for ownership at the time. -------------------------------*/
+{
+  /* sold player: only points from the week he left onward count */
+  Store.pool = [{ id: 901, selected: 40 }];
+  Store.squad = [
+    { id: 901, teamId:1, pos:'MID', price:8, outGW:5, start:false, history: [
+      { gw:3, points:10 },   // before he left — must not count
+      { gw:5, points:6  },   // the week he left — counts
+      { gw:6, points:12 },   // after leaving — counts
+    ] },
+  ];
+  const risk = Store.soldPlayerRisk();
+  assert.equal(risk.rows.length, 1);
+  assert.equal(risk.rows[0].pointsSince, 18, 'only points from outGW onward count');
+  assert.equal(risk.rows[0].risk, 0.4 * 18, 'weighted by his ownership, not the field he left behind');
+  assert.equal(risk.total, 7.2);
+
+  /* a sold player who never scores again contributes nothing, not a
+     zero-value row cluttering the list */
+  Store.squad = [
+    { id: 902, teamId:1, pos:'DEF', price:5, outGW:5, start:false,
+      history:[{ gw:5, points:0 }, { gw:6, points:0 }] },
+  ];
+  Store.pool = [{ id:902, selected:50 }];
+  const riskZero = Store.soldPlayerRisk();
+  assert.equal(riskZero.rows.length, 0, 'no points since leaving means no risk row at all');
+  assert.equal(riskZero.total, 0);
+
+  /* differential reward: only weeks he actually STARTED for you count,
+     and only from the gameweek he joined onward */
+  Store.currentGW = 6;
+  Store.pool = [{ id:903, selected:5 }];
+  Store.squad = [
+    { id:903, teamId:1, pos:'FWD', price:6, inGW:4, outGW:null, start:true, history:[
+      { gw:3, points:20 },  // before he joined — must not count
+      { gw:4, points:8  },
+      { gw:5, points:15 },  // benched this week — must not count
+      { gw:6, points:2  },
+    ] },
+    { id:904, teamId:2, pos:'FWD', price:5, inGW:null, outGW:null, start:false, history:[] },
+  ];
+  Store.lineups = {
+    4: { memberIds:[903,904], starterIds:[903] },
+    5: { memberIds:[903,904], starterIds:[904] },   // 903 benched this week
+    6: { memberIds:[903,904], starterIds:[903] },
+  };
+  const reward = Store.differentialReward();
+  assert.equal(reward.rows.length, 1, 'the never-scoring squadmate contributes no row');
+  assert.equal(reward.rows[0].player.id, 903);
+  assert.equal(reward.rows[0].pointsSince, 10, 'gw4 (8) + gw6 (2) only — not the pre-transfer gw3, not the benched gw5');
+  assert.equal(reward.rows[0].reward, 0.95 * 10, 'weighted by how little of the field shares him');
+  assert.equal(reward.total, 9.5);
+}
+
+console.log('ok — 75 assertions passed');
