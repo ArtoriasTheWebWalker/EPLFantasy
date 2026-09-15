@@ -237,6 +237,7 @@ export function chipEl(player, opts={}){
   const el = document.createElement('button');
   el.className = 'chip' + (opts.grade ? ` g-${opts.grade}` : '');
   el.dataset.pid = player.id;                 // used by drag-and-drop hit testing
+  el.dataset.pos = player.pos || '';           // read by ::after for the background position mark
   el.innerHTML = `
     ${opts.showCap && opts.cap  ? '<span class="capstar">C</span>'  : ''}
     ${opts.showCap && opts.vice ? '<span class="vicestar">V</span>'  : ''}

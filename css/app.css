@@ -384,12 +384,18 @@ section{margin-bottom:30px}
 .bench .mini-title{margin-bottom:10px}
 .bench-row{display:flex;gap:9px;flex-wrap:nowrap;justify-content:center}
 
-/* ---------- player chip ---------- */
+/* ---------- player chip ----------
+   Redesigned 2026-09-15 around a trading-card-meets-broadcast-graphic
+   idea: a large ghost position mark behind the shirt, a jersey-
+   nameplate typeface on the name, a faceted points tag instead of a
+   plain pill, and a slow foil sweep reserved for the top grade only
+   — so "exceptional" reads as genuinely rare, not just another colour. */
 .chip{
   width:106px;
   background:linear-gradient(180deg,rgba(10,16,30,.9),rgba(6,10,20,.82));
   backdrop-filter:blur(4px);
-  border:1px solid var(--glass-brd);border-radius:14px;padding:9px 6px 8px;cursor:pointer;
+  border:1px solid color-mix(in srgb,var(--grade,#7a8698) 35%,var(--glass-brd));
+  border-radius:14px;padding:9px 6px 8px;cursor:pointer;
   text-align:center;color:var(--chalk);font-family:var(--font-body);position:relative;
   border-top:3px solid var(--grade,#7a8698);
   box-shadow:0 8px 22px -12px rgba(0,0,0,.8), inset 0 1px 0 rgba(255,255,255,.06);
@@ -397,10 +403,37 @@ section{margin-bottom:30px}
   opacity:1;
   @starting-style{ opacity:0;transform:translateY(6px) scale(.94); }
 }
+/* ghost position mark — a large, near-invisible watermark behind the
+   shirt, tinted to the grade colour. Paints in normal flow order, but
+   at ~6% opacity it reads as texture rather than a second label. */
+.chip::after{
+  content:attr(data-pos);
+  position:absolute;inset:0;z-index:0;
+  display:flex;align-items:center;justify-content:center;
+  font-family:var(--font-display);font-size:34px;line-height:1;
+  letter-spacing:-.02em;color:var(--grade,#7a8698);
+  opacity:.07;mix-blend-mode:overlay;pointer-events:none;
+}
+.chip > *{position:relative;z-index:1}
+/* foil sweep — reserved for g-blue ("Exceptional") only, so it stays
+   a rarity cue rather than motion on every card. Slow and continuous
+   rather than a one-shot reveal, since render() rebuilds every chip
+   from scratch on each store change — a "plays once" animation would
+   effectively replay constantly instead of feeling special. */
 .chip::before{
   content:"";position:absolute;inset:-1px;border-radius:14px;pointer-events:none;
-  box-shadow:0 0 0 1px transparent;
-  transition:box-shadow 200ms ease;
+  z-index:2;
+}
+.chip.g-blue::before{
+  background:linear-gradient(115deg,
+    transparent 32%, rgba(255,255,255,.14) 46%, rgba(255,255,255,.26) 50%,
+    rgba(255,255,255,.14) 54%, transparent 68%);
+  background-size:260% 260%;
+  animation:chipFoil 5.5s linear infinite;
+}
+@keyframes chipFoil{
+  0%  { background-position:-90% -90%; }
+  100%{ background-position:90% 90%; }
 }
 @media (hover:hover) and (pointer:fine){
   .chip:hover{
@@ -429,29 +462,39 @@ section{margin-bottom:30px}
   background:rgba(0,0,0,.34);
   box-shadow:inset 0 1px 0 rgba(255,255,255,.28);
 }
-/* fabric shading: grain + sheen + rounded sides + sleeve/hem depth
-   (clipped to jersey shape). The grain is a tiny tiled SVG noise
-   texture at ~5% opacity, baked into the SVG itself so it layers
-   correctly under the sheen/shadow gradients without a blend-mode
-   hack — the difference between "flat gradient" and "fabric". */
+/* fabric shading: grain + a grade-tinted chest sash + sheen + rounded
+   sides + sleeve/hem depth (clipped to jersey shape). The grain is a
+   tiny tiled SVG noise texture at ~5% opacity, baked into the SVG
+   itself so it layers correctly with the rest without a blend-mode
+   hack. The sash ties the shirt itself to the same grade colour as
+   the border and the points tag, instead of grade only ever showing
+   up as an outline — a thin diagonal band, not a recolour, so the
+   actual kit is still what reads first. */
 .shirt::after{
   content:"";position:absolute;inset:0;pointer-events:none;
   background-image:
     url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='60' height='60'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.9' numOctaves='2' stitchTiles='stitch'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23n)' opacity='0.05'/%3E%3C/svg%3E"),
+    linear-gradient(115deg, transparent 40%, color-mix(in srgb,var(--grade,#8892a0) 65%,transparent) 44%, color-mix(in srgb,var(--grade,#8892a0) 65%,transparent) 50%, transparent 54%),
     linear-gradient(102deg, rgba(255,255,255,.24) 0%, rgba(255,255,255,0) 34%),
     linear-gradient(90deg, rgba(0,0,0,.30) 0%, transparent 20%, transparent 80%, rgba(0,0,0,.30) 100%),
     linear-gradient(180deg, rgba(255,255,255,.10) 0%, transparent 22%, transparent 76%, rgba(0,0,0,.22) 100%);
-  background-size:48px 48px, auto, auto, auto;
+  background-size:48px 48px, auto, auto, auto, auto;
 }
 .pstripe{
   font-family:var(--font-data);font-size:12.5px;font-weight:700;
-  padding:3px 0;border-radius:7px;margin:6px auto 4px;width:66px;
+  padding:3px 0;margin:6px auto 4px;width:66px;
+  clip-path:polygon(5% 0,95% 0,100% 50%,95% 100%,5% 100%,0% 50%);
   background:linear-gradient(180deg,color-mix(in srgb,var(--grade,#888) 92%,white 8%),var(--grade,#888));
   color:#06131f;
   box-shadow:0 3px 10px -3px color-mix(in srgb,var(--grade,#888) 70%,transparent);
 }
 .pstripe small{font-size:7px;font-weight:600;letter-spacing:.08em;opacity:.8}
-.chip .name{font-size:12.5px;font-weight:600;line-height:1.2;margin-bottom:2px}
+.chip .name{
+  font-family:var(--font-display);font-size:11.5px;line-height:1.2;margin-bottom:2px;
+  letter-spacing:.01em;text-transform:uppercase;
+  white-space:nowrap;overflow:hidden;text-overflow:ellipsis;
+  text-shadow:0 1px 3px rgba(0,0,0,.5);
+}
 .chip .meta{font-family:var(--font-data);font-size:8px;color:var(--chalk-dim);letter-spacing:.04em}
 .capstar{
   position:absolute;top:-7px;left:-5px;width:20px;height:20px;border-radius:50%;
@@ -741,8 +784,9 @@ footer{
      the official-app density where 4 shirts sit in one row on mobile. */
   .chip,.slot{width:68px}
   .chip{padding:5px 4px 5px;border-top-width:2.5px;border-radius:11px}
+  .chip::after{font-size:20px}
   .shirt{width:30px;height:26px;margin:1px auto 1px}
-  .pstripe{width:52px;font-size:10px;padding:1px 0;margin:3px auto 2px;border-radius:5px}
+  .pstripe{width:52px;font-size:10px;padding:1px 0;margin:3px auto 2px}
   .pstripe small{font-size:6px}
   .chip .name{font-size:10px;margin-bottom:1px;line-height:1.15}
   .chip .meta{font-size:7px;letter-spacing:.03em}
