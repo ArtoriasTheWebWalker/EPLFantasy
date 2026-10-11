@@ -55,6 +55,25 @@ function writeCacheForever(key, data){
   try{ localStorage.setItem(key, JSON.stringify({ at:Date.now(), data })); }catch{}
 }
 
+/* A double gameweek comes back from element-summary as one row PER
+   FIXTURE, both with the same round. Everything downstream reads one
+   row per GW (pointsIn / minutesIn use find), so the second match was
+   silently dropped. Fold them here, once: counts add up; opponent and
+   home stay the first fixture's. defCon is a per-MATCH threshold, so
+   it keeps the better match rather than a sum that could fake a hit. */
+export function mergeDoubleGW(rows){
+  const byGW = new Map();
+  for(const r of rows){
+    const prev = byGW.get(r.gw);
+    if(!prev){ byGW.set(r.gw, { ...r }); continue; }
+    for(const k of Object.keys(r)){
+      if(k === 'gw' || k === 'opponentId' || typeof r[k] !== 'number') continue;
+      prev[k] = k === 'defCon' ? Math.max(prev[k] ?? 0, r[k]) : (prev[k] ?? 0) + r[k];
+    }
+  }
+  return [...byGW.values()];
+}
+
 /* =====================================================
    PUBLIC API
 ===================================================== */
@@ -153,7 +172,7 @@ export const API = {
     try{
       const path = CONFIG.ENDPOINTS.playerHist.replace('{id}', id);
       const raw = await getJSON(path);
-      return raw.history.map(h=>({
+      return mergeDoubleGW(raw.history.map(h=>({
         gw       : h.round,
         points   : h.total_points,
         minutes  : h.minutes,
@@ -175,7 +194,7 @@ export const API = {
         defCon   : h.defensive_contribution,
         opponentId: h.opponent_team,
         home     : h.was_home
-      }));
+      })));
     }catch(err){
       this.lastError = err.message;
       return null;
@@ -232,6 +251,10 @@ export const API = {
         homeScore: f.team_h_score,
         awayScore: f.team_a_score,
         finished: f.finished,
+        /* full time, before FPL's data check flips `finished` (which
+           can lag hours). The official Points page reads this one. */
+        finishedProvisional: f.finished_provisional,
+        started : f.started,
         kickoff : f.kickoff_time
       }));
     }catch(err){
@@ -299,10 +322,13 @@ export const API = {
   },
 
   /* The XI/bench/captain/vice for one gameweek — the real record.
-     Cached per-manager-per-GW so past weeks don't re-fetch. */
-  async entryPicks(id, gw){
+     Cached per-manager-per-GW so past weeks don't re-fetch. The
+     gameweek in progress is never cached (cacheable:false): FPL
+     rewrites its multipliers as auto-subs land, and serves it
+     no-store for exactly that reason. */
+  async entryPicks(id, gw, cacheable = true){
     const cacheKey = `fpl2627_picks_${id}_${gw}`;
-    const cached = readCache(cacheKey);
+    const cached = cacheable ? readCache(cacheKey) : null;
     if(cached) return cached;
     try{
       const path = CONFIG.ENDPOINTS.entryPicks
@@ -324,7 +350,7 @@ export const API = {
           isVice     : !!p.is_vice_captain
         }))
       };
-      writeCache(cacheKey, out);
+      if(cacheable) writeCache(cacheKey, out);
       return out;
     }catch(err){ this.lastError = err.message; return null; }
   },

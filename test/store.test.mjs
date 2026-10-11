@@ -437,4 +437,70 @@ assert.deepEqual(Store.lineups[6].starterIds, [301, 303], 'a future week snapsho
   assert.equal(new Set(exp2.rows.map(r=>r.alt.id)).size, 3, 'all three alternatives are distinct players');
 }
 
-console.log('ok — 86 assertions passed');
+/* --- Live gameweek: 0 minutes before kick-off is not a blank ----------
+   The official Points page (11 Oct 2026) kept Haaland and Botman in the
+   XI on 0 minutes because their matches hadn't started; automatic_subs
+   was empty. Auto-sub and the vice's armband must wait for full time,
+   and a linked account's total must be the live sum, not FPL's lagging
+   stored figure, until the week is data-checked. */
+{
+  const GW = 70;
+  const p = (id, pos, teamId, minutes) => ({
+    id, pos, teamId, name: `L${id}`, outGW: null, start: false,
+    history: [{ gw: GW, points: minutes > 0 ? 2 : 0, minutes }],
+  });
+  Store.squad = [
+    p(1, 'GK', 1, 90), p(2, 'GK', 1, 90),
+    p(3, 'DEF', 1, 0),                       // blanked, match over
+    p(4, 'DEF', 1, 90), p(5, 'DEF', 1, 90), p(6, 'DEF', 1, 90),
+    p(11, 'MID', 1, 90), p(12, 'MID', 1, 90), p(13, 'MID', 1, 90), p(14, 'MID', 1, 90),
+    p(21, 'FWD', 3, 0),                      // match not started yet
+    p(22, 'FWD', 1, 90),
+    p(7, 'DEF', 2, 90), p(23, 'FWD', 2, 90), p(15, 'MID', 2, 0),   // bench: 7, 23, 15
+  ];
+  Store.lineups = { [GW]: {
+    memberIds:  [1,3,4,5,6,11,12,13,14,21,22,2,7,23,15],
+    starterIds: [1,3,4,5,6,11,12,13,14,21,22],
+  }};
+  Store.chips = {}; Store.captains = { [GW]: 21 }; Store.vices = { [GW]: 11 };
+  Store.gwHistory = { [GW]: { points: 1, transferCost: 4 } };
+  Store.fixtures = [
+    { gw: GW, homeId: 1, awayId: 2, finished: false, finishedProvisional: true },
+    { gw: GW, homeId: 3, awayId: 4, finished: false, finishedProvisional: false },
+  ];
+
+  let ids = Store.autoSubStarters(GW).map(x => x.id);
+  assert.ok(!ids.includes(3) && ids.includes(7), 'a starter whose match is over and who blanked is subbed');
+  assert.ok(ids.includes(21) && !ids.includes(23), 'a starter on 0 minutes before kick-off stays in the XI');
+  assert.equal(Store.effectiveCaptain(GW).player.id, 21, 'the vice does not take the armband before the captain has played');
+  assert.equal(Store.gwPointsFor(GW), 20 - 4, 'linked but live: the live sum, less the hit — not the stored total');
+
+  Store.fixtures[1].finishedProvisional = true;
+  ids = Store.autoSubStarters(GW).map(x => x.id);
+  assert.ok(!ids.includes(21) && ids.includes(23), 'once his match is over, the blank is subbed');
+  assert.equal(Store.effectiveCaptain(GW).player.id, 11, 'and the vice takes the armband');
+
+  Store.fixtures.forEach(f => { f.finished = true; });
+  assert.equal(Store.gwPointsFor(GW), 1 - 4, 'a data-checked week uses FPL\'s own total');
+  Store.fixtures = [];
+}
+
+/* --- Double gameweek: element-summary sends one row per fixture -------- */
+{
+  const { mergeDoubleGW } = await import('../js/api.js');
+  const rows = mergeDoubleGW([
+    { gw: 8, points: 2, minutes: 90, defCon: 7, opponentId: 5, home: true },
+    { gw: 9, points: 6, minutes: 90, defCon: 11, opponentId: 6, home: false },
+    { gw: 9, points: 9, minutes: 80, defCon: 4, opponentId: 7, home: true },
+  ]);
+  assert.equal(rows.length, 2, 'one row per gameweek');
+  const dgw = rows.find(r => r.gw === 9);
+  assert.equal(dgw.points, 15, 'both fixtures\' points count');
+  assert.equal(dgw.minutes, 170, 'and both fixtures\' minutes');
+  assert.equal(dgw.defCon, 11, 'defCon is per match, so the better match, not a sum');
+  assert.equal(dgw.opponentId, 6, 'opponent stays the first fixture\'s');
+  assert.deepEqual(rows.find(r => r.gw === 8), { gw: 8, points: 2, minutes: 90, defCon: 7, opponentId: 5, home: true },
+    'a single-fixture week is untouched');
+}
+
+console.log('ok — 99 assertions passed');

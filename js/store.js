@@ -614,6 +614,9 @@ export const Store = {
      squad), apply the substitution using real minutes from `gw`. */
   _applyAutoSub(starters, bench, gw){
     const minutesOf = p => this.minutesIn(p, gw) ?? 0;
+    /* 0 minutes only counts as a blank once his match is over — before
+       kick-off he simply hasn't played yet */
+    const blanked = p => minutesOf(p) === 0 && this.matchesDone(p, gw);
 
     let xi = [...starters];
 
@@ -621,7 +624,7 @@ export const Store = {
        starting keeper, whatever the outfield bench order says */
     const startGK = xi.find(p=>p.pos==='GK');
     const benchGK = bench.find(p=>p.pos==='GK');
-    if(startGK && minutesOf(startGK) === 0 && benchGK && minutesOf(benchGK) > 0){
+    if(startGK && blanked(startGK) && benchGK && minutesOf(benchGK) > 0){
       xi = xi.map(p => p === startGK ? benchGK : p);
     }
 
@@ -637,7 +640,7 @@ export const Store = {
       if(xi.includes(sub)) continue;          // already came on (shouldn't happen, but safe)
       if(minutesOf(sub) === 0) continue;      // he didn't play either — can't help
 
-      const blanking = xi.filter(p=>p.pos!=='GK' && minutesOf(p) === 0);
+      const blanking = xi.filter(p=>p.pos!=='GK' && blanked(p));
       for(const out of blanking){
         const trial = xi.map(p => p === out ? sub : p);
         if(isLegalXI(trial)){ xi = trial; break; }
@@ -645,6 +648,24 @@ export const Store = {
     }
 
     return xi;
+  },
+
+  /* True once every fixture his club plays in `gw` has reached full
+     time (FPL's finished_provisional), or he has none (a blank).
+     Auto-subs and the vice's armband both wait for this. Seen on the
+     official Points page, 11 Oct 2026: Haaland and Botman on 0 minutes
+     before kick-off, automatic_subs empty, both still counting. With
+     no fixtures loaded this returns true — the pre-fix behaviour. */
+  matchesDone(player, gw){
+    return (this.fixtures || [])
+      .filter(f => f.gw === gw && (f.homeId === player.teamId || f.awayId === player.teamId))
+      .every(f => f.finishedProvisional ?? f.finished);
+  },
+
+  /* True once FPL has data-checked every fixture of `gw`. Until then
+     the official app shows a live sum, not the stored history total. */
+  gwFinished(gw){
+    return (this.fixtures || []).filter(f => f.gw === gw).every(f => f.finished);
   },
 
   /* The XI as it stands right now, on the working (not-yet-frozen)
@@ -672,11 +693,13 @@ export const Store = {
      right before its first mutation.
   ================================================= */
   gwPointsFor(gw){
-    /* if linked, FPL's own tally is authoritative (and already
-       includes real auto-subs, so nothing more to do here) */
+    /* if linked, FPL's own tally is authoritative once the week is
+       finished. While it's live that stored total lags badly (35 vs
+       a live 56 on 11 Oct 2026), so do what the official Points page
+       does: sum live points over the picks, then take the hit off. */
     const hist = this.gwHistory[gw];
-    if(hist && Number.isFinite(hist.points)){
-      const cost = Number.isFinite(hist.transferCost) ? hist.transferCost : 0;
+    const cost = Number.isFinite(hist?.transferCost) ? hist.transferCost : 0;
+    if(hist && Number.isFinite(hist.points) && this.gwFinished(gw)){
       return hist.points - cost;
     }
 
@@ -696,7 +719,7 @@ export const Store = {
         total += this.pointsIn(p, gw) ?? 0;
       }
     }
-    return total;
+    return total - cost;
   },
 
   seasonPointsTotal(){
@@ -1240,13 +1263,15 @@ export const Store = {
   },
 
   /* who actually gets the 2x for a gameweek.
-     If the captain played 0 minutes that week, the vice takes over. */
+     If the captain played 0 minutes that week, the vice takes over —
+     but only once the captain's match is over, not before kick-off.
+     No history row at all (a blank) counts as 0 minutes. */
   effectiveCaptain(gw){
     const cap  = this.captainOf(gw);
     const vice = this.viceOf(gw);
     if(!cap) return { player:null, fallback:false };
-    const capMin = this.minutesIn(cap, gw);
-    if(vice && capMin === 0) return { player:vice, fallback:true };
+    const capMin = this.minutesIn(cap, gw) ?? 0;
+    if(vice && capMin === 0 && this.matchesDone(cap, gw)) return { player:vice, fallback:true };
     return { player:cap, fallback:false };
   },
 
@@ -1525,7 +1550,7 @@ export const Store = {
        deadline hasn't passed) are swallowed. */
     const pickPromises = [];
     for(let gw = 1; gw <= this.currentGW; gw++){
-      pickPromises.push(API.entryPicks(this.managerId, gw).then(p => ({ gw, p })));
+      pickPromises.push(API.entryPicks(this.managerId, gw, gw < this.currentGW).then(p => ({ gw, p })));
     }
     const [pickResults, historyRaw] = await Promise.all([
       Promise.all(pickPromises),
