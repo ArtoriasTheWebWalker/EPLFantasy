@@ -146,6 +146,10 @@ header.scrolled{
 .deadline-chip b{color:var(--chalk);margin-right:4px}
 .deadline-chip.soon{color:var(--amber);border-color:rgba(255,196,61,.4);background:rgba(255,196,61,.1)}
 .deadline-chip.passed{color:var(--chalk-faint)}
+.live-chip{cursor:pointer;font:inherit;font-family:var(--font-data);font-size:9.5px;font-weight:600;letter-spacing:.06em;
+  color:var(--lime);border-color:rgba(182,255,61,.4);background:rgba(182,255,61,.1)}
+.live-chip:active{transform:scale(.96)}
+.live-chip.busy{opacity:.55;pointer-events:none}
 .brand .dot{
   width:10px;height:10px;border-radius:50%;
   background:var(--lime);

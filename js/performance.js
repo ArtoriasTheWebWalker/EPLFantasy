@@ -18,6 +18,7 @@
 
 import { CONFIG } from './config.js';
 import { Store }  from './store.js';
+import { API }    from './api.js';
 import { Modal, chipEl, apiBanner, emptyNote, wireSlideNav, animateNumber } from './ui.js';
 
 /* concrete grade colours (kept in sync with css :root) — used where an
@@ -48,6 +49,7 @@ const Performance = {
     this.renderOptimalXI();
     this.renderBenchCalls();
     this.renderKeeperDuel();
+    this.renderTeamOfTheWeek();
     this.renderTransfers();
     this.renderSeasonSummary();
   },
@@ -392,7 +394,7 @@ const Performance = {
       return `<span class="${have===want?'done':''}">${pos} ${have}/${want}</span>`;
     }).join('');
 
-    const n = Store.squad.length;
+    const n = Store.activeSquad().length;
     const val = Store.squadValue();
     const issues = n === CONFIG.SQUAD.TOTAL ? Store.formationIssues() : [];
 
@@ -675,6 +677,36 @@ const Performance = {
       <div class="cap-rate">Points left on the bench this season: <b>${totalLeft}</b></div>`;
   },
 
+  /* FPL's Team of the Week for the latest played GW — the best XI from
+     every player, next to Optimal XI's best from your own fifteen.
+     Fetched once per GW per session; a live week re-fetches on reload. */
+  totw: {},
+  renderTeamOfTheWeek(){
+    const el = document.getElementById('totwArea');
+    if(!el) return;
+    const gw = this.playedWeeks().at(-1);
+    if(!gw){ el.innerHTML = emptyNote('No gameweeks played yet.'); return; }
+
+    const data = this.totw[gw];
+    if(data === undefined){
+      this.totw[gw] = null;                       // in flight
+      API.dreamTeam(gw).then(d => { this.totw[gw] = d || false; this.renderTeamOfTheWeek(); });
+    }
+    if(!data){ el.innerHTML = emptyNote(data === false ? 'Team of the Week unavailable.' : 'Loading…'); return; }
+
+    const mine  = new Set(Store.squadForGW(gw).map(p => p.id));
+    const name  = id => Store.pool.find(p => p.id === id)?.name || `#${id}`;
+    const total = data.team.reduce((s, t) => s + t.points, 0);
+    const owned = data.team.filter(t => mine.has(t.element)).length;
+
+    el.innerHTML = `<table class="tbl">
+      <thead><tr><th>GW${gw}</th><th>Pts</th></tr></thead>
+      <tbody>${data.team.map(t => `<tr>
+        <td>${name(t.element)}${mine.has(t.element) ? ' <span class="vtag">yours</span>' : ''}</td>
+        <td class="num">${t.points}</td></tr>`).join('')}</tbody></table>
+      <div class="cap-rate">${total} pts · you owned <b>${owned}</b> of 11${data.top ? ` · top player ${name(data.top.id)} (${data.top.points})` : ''}</div>`;
+  },
+
   renderBenchCalls(){
     const el = document.getElementById('benchCallsArea');
     const weeks = this.playedWeeks();
@@ -771,6 +803,8 @@ const Performance = {
     const worst = [...byGW].sort((a,b)=>a.pts-b.pts)[0];
     const avg   = byGW.reduce((s,x)=>s+x.pts, 0) / byGW.length;
 
+    const benchPts = weeks.reduce((s, gw) => s + Store.benchPointsFor(gw), 0);
+
     const totalHits = Store.managerId != null
       ? weeks.reduce((s,gw)=> s + (Store.gwHistory[gw]?.transferCost || 0), 0)
       : null;
@@ -798,6 +832,7 @@ const Performance = {
         <div class="cand-stat">Best GW<b style="color:var(--lime)">GW${best.gw} · ${best.pts}</b></div>
         <div class="cand-stat">Worst GW<b style="color:var(--red)">GW${worst.gw} · ${worst.pts}</b></div>
         <div class="cand-stat">Average<b>${avg.toFixed(1)}</b></div>
+        <div class="cand-stat">On the bench<b>${benchPts}</b></div>
         <div class="cand-stat">Hits taken<b>${totalHits!=null ? `&minus;${totalHits}` : '—'}</b></div>
       </div>
       <div class="mini-title">Chip weeks</div>

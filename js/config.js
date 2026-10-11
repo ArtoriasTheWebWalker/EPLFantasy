@@ -48,12 +48,19 @@ export const CONFIG = {
     entry        : '/entry/{id}/',              // manager profile (name, rank, chips)
     entryHistory : '/entry/{id}/history/',      // per-GW totals and rank
     entryPicks   : '/entry/{id}/event/{gw}/picks/',  // XI/bench/captain for one GW
-    entryTransfers: '/entry/{id}/transfers/'    // every transfer with GW and cost
+    entryTransfers: '/entry/{id}/transfers/',   // every transfer with GW and cost
+    eventStatus  : '/event-status/',            // per matchday: live / provisional / confirmed
+    dreamTeam    : '/dream-team/{gw}/',         // FPL's Team of the Week
+    setPieceNotes: '/team/set-piece-notes/'     // per-club set-piece taker notes
   },
 
   /* ---------- refresh ---------- */
   REFRESH_HOUR: 4,                 // daily data refresh at 04:00 local
   CACHE_TTL_MS: 1000*60*60*12,
+  /* bootstrap carries injury news and nightly price moves; FPL itself
+     serves it max-age=300. 30 min keeps it fresh for ~1 proxy request
+     per open, far inside the Worker free tier's 100k/day. */
+  BOOTSTRAP_TTL_MS: 1000*60*30,
 
   /* ---------- storage keys ---------- */
   STORE: {
@@ -68,7 +75,7 @@ export const CONFIG = {
     entryMeta : 'fpl2627_entry_meta',      // { teamName, rank, ... }
     chips     : 'fpl2627_chips',           // { [gw]: '3xc'|'bboost'|'wildcard'|'freehit' }
     gwHistory : 'fpl2627_gw_history',      // { [gw]: {points, transferCost, ...} } from FPL entryHistory
-    bootstrap : 'fpl2627_bootstrap_cache_v4',   // _v4: boot payload gained price-change projections
+    bootstrap : 'fpl2627_bootstrap_cache_v5',   // _v5: price likelihood/lock + chip windows
     lastPage  : 'fpl2627_last_page',       // which top-level tab was open last (Performance/Draft/Table)
     freeTransfers       : 'fpl2627_free_transfers',          // local estimate, unlinked accounts only
     freeTransfersSeenGW : 'fpl2627_free_transfers_seen_gw',  // last GW the estimate advanced through
@@ -105,7 +112,7 @@ export const CONFIG = {
      Two sets across the season: one of each per half. The first set
      expires at the GW19 deadline and does NOT carry over.
   ---------------------------- */
-  CHIP_HALF_END: 19,               // last GW of the first set
+  CHIP_HALF_END: 19,               // last GW of the first set — fallback only; bootstrap.chips wins
 
   /* ---------- grade thresholds ----------
      ratio = player points / position average that week

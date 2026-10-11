@@ -465,8 +465,8 @@ assert.deepEqual(Store.lineups[6].starterIds, [301, 303], 'a future week snapsho
   Store.chips = {}; Store.captains = { [GW]: 21 }; Store.vices = { [GW]: 11 };
   Store.gwHistory = { [GW]: { points: 1, transferCost: 4 } };
   Store.fixtures = [
-    { gw: GW, homeId: 1, awayId: 2, finished: false, finishedProvisional: true },
-    { gw: GW, homeId: 3, awayId: 4, finished: false, finishedProvisional: false },
+    { gw: GW, homeId: 1, awayId: 2, dataChecked: false, finished: true },
+    { gw: GW, homeId: 3, awayId: 4, dataChecked: false, finished: false },
   ];
 
   let ids = Store.autoSubStarters(GW).map(x => x.id);
@@ -475,12 +475,12 @@ assert.deepEqual(Store.lineups[6].starterIds, [301, 303], 'a future week snapsho
   assert.equal(Store.effectiveCaptain(GW).player.id, 21, 'the vice does not take the armband before the captain has played');
   assert.equal(Store.gwPointsFor(GW), 20 - 4, 'linked but live: the live sum, less the hit — not the stored total');
 
-  Store.fixtures[1].finishedProvisional = true;
+  Store.fixtures[1].finished = true;
   ids = Store.autoSubStarters(GW).map(x => x.id);
   assert.ok(!ids.includes(21) && ids.includes(23), 'once his match is over, the blank is subbed');
   assert.equal(Store.effectiveCaptain(GW).player.id, 11, 'and the vice takes the armband');
 
-  Store.fixtures.forEach(f => { f.finished = true; });
+  Store.fixtures.forEach(f => { f.dataChecked = true; });
   assert.equal(Store.gwPointsFor(GW), 1 - 4, 'a data-checked week uses FPL\'s own total');
   Store.fixtures = [];
 }
@@ -503,4 +503,71 @@ assert.deepEqual(Store.lineups[6].starterIds, [301, 303], 'a future week snapsho
     'a single-fixture week is untouched');
 }
 
-console.log('ok — 99 assertions passed');
+/* --- Chip windows come from the engine, not a hard-coded GW19 -------- */
+{
+  Store.chips = {};
+  Store.chipWindows = [];
+  assert.equal(Store.chipHalfEnd(), 19, 'no engine data yet: falls back to the config value');
+
+  Store.chipWindows = [
+    { code:'wildcard', start:2,  stop:20 }, { code:'wildcard', start:21, stop:38 },
+    { code:'3xc',      start:1,  stop:20 }, { code:'3xc',      start:21, stop:38 },
+  ];
+  assert.equal(Store.chipHalfEnd(), 20, 'the first half ends where the engine says');
+  assert.equal(Store.chipHalf(20), 1);
+  assert.equal(Store.setChip(1, 'wildcard').ok, false, 'Wildcard is refused before its window opens');
+  assert.equal(Store.setChip(1, '3xc').ok, true, 'Triple Captain is open from GW1');
+  Store.chips = {}; Store.chipWindows = [];
+}
+
+/* --- Live reload: one event/{gw}/live/ pull updates every squad row,
+   the live window is kicked-off-but-not-data-checked, and bench points
+   are the bench players auto-sub didn't bring on. ------------------- */
+{
+  const GW = 80;
+  Store.squad = [
+    { id:1, pos:'MID', teamId:1, outGW:null, history:[{ gw:GW, points:2, minutes:30 }] },
+    { id:2, pos:'MID', teamId:1, outGW:null, history:[] },
+  ];
+  Store.applyLive(GW, { 1:{ points:9, minutes:90 }, 2:{ points:3, minutes:60 }, 99:{ points:5, minutes:90 } });
+  assert.equal(Store.pointsIn(Store.squad[0], GW), 9, 'an existing row takes the live total');
+  assert.equal(Store.minutesIn(Store.squad[1], GW), 60, 'a player with no row yet gets one');
+
+  Store.fixtures = [{ gw:GW, homeId:1, awayId:2, started:false, finished:false, dataChecked:false }];
+  assert.equal(Store.gwLive(GW), false, 'not live before kick-off');
+  Store.fixtures[0].started = true;
+  assert.equal(Store.gwLive(GW), true, 'live once a match has started');
+  Store.fixtures[0].dataChecked = true;
+  assert.equal(Store.gwLive(GW), false, 'over once FPL has data-checked it');
+
+  /* bench points: 15 = the bench player who wasn't needed */
+  const p = (id, pos, pts, min) => ({ id, pos, teamId:1, outGW:null, history:[{ gw:GW, points:pts, minutes:min }] });
+  Store.squad = [p(10,'GK',2,90), p(11,'DEF',2,90), p(12,'DEF',2,90), p(13,'DEF',2,90),
+    p(14,'MID',2,90), p(15,'MID',2,90), p(16,'MID',2,90), p(17,'MID',2,90),
+    p(18,'FWD',2,90), p(19,'FWD',2,90), p(20,'FWD',2,90),
+    p(21,'GK',6,90), p(22,'DEF',15,90), p(23,'MID',1,90), p(24,'FWD',4,90)];
+  Store.lineups = { [GW]: { memberIds:[10,11,12,13,14,15,16,17,18,19,20,21,22,23,24], starterIds:[10,11,12,13,14,15,16,17,18,19,20] } };
+  Store.gwHistory = {}; Store.chips = {};
+  assert.equal(Store.benchPointsFor(GW), 6 + 15 + 1 + 4, 'everything on an unused bench counts');
+  Store.chips = { [GW]:'bboost' };
+  assert.equal(Store.benchPointsFor(GW), 0, 'nothing sits on the bench under Bench Boost');
+  Store.chips = {}; Store.fixtures = [];
+}
+
+/* --- A transferred-out player must not switch lineup checks off -------
+   Store.squad keeps every player ever owned, so counting it made any
+   team with a past transfer look "still building" and skipped the
+   formation check entirely. */
+{
+  const row = (id, pos, start, outGW = null) => ({ id, pos, teamId: id, outGW, start, history: [] });
+  Store.squad = [
+    row(1,'GK',true), row(2,'GK',false),
+    row(3,'DEF',true), row(4,'DEF',true), row(5,'DEF',false), row(6,'DEF',false), row(7,'DEF',false),
+    row(8,'MID',true), row(9,'MID',true), row(10,'MID',true), row(11,'MID',true), row(12,'MID',true),
+    row(13,'FWD',true), row(14,'FWD',true), row(15,'FWD',true),
+    row(99,'DEF',false, 3),                        // sold in GW3
+  ];
+  assert.ok(Store._lineupIssue(), 'two defenders is illegal even with a retired row in the squad');
+}
+
+console.log('ok — 112 assertions passed');

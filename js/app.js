@@ -10,7 +10,7 @@
 import { CONFIG } from './config.js';
 import { API }    from './api.js';
 import { Store }  from './store.js';
-import { Modal }  from './ui.js';
+import { Modal, toast } from './ui.js';
 import { Sync }   from './sync.js';
 
 const PAGES = ['performance','draft','table'];
@@ -122,6 +122,56 @@ function renderDeadline(){
   el.innerHTML = `<b>GW${gw}</b> ${ms > 0 ? formatCountdown(ms) : 'deadline passed'}`;
 }
 
+/* ---------- live gameweek ----------
+   What the official Points page does while a week is unfinished: no
+   polling, a manual reload. One event/{gw}/live/ call carries every
+   player's points (bonus included), plus fixtures and event-status —
+   three proxy requests per tap. The label is FPL's own status. */
+const LIVE_LABEL = { l:'Live', p:'Provisional', r:'Confirmed' };
+
+function liveStatusLabel(gw){
+  const days = (Store.eventStatus?.status || []).filter(s => s.event === gw);
+  for(const code of ['l','p','r']) if(days.some(d => d.points === code)) {
+    const label = LIVE_LABEL[code];
+    return code === 'p' && days.some(d => d.points === 'p' && !d.bonus_added) ? `${label} · bonus pending` : label;
+  }
+  return 'Live';
+}
+
+function renderLiveChip(){
+  const el = document.getElementById('liveChip');
+  if(!el) return;
+  const gw = Store.currentGW;
+  el.hidden = !Store.gwLive(gw);
+  if(el.hidden) return;
+  el.innerHTML = `<b>GW${gw}</b> ${liveStatusLabel(gw)} ↻`;
+}
+
+let reloading = false;
+async function reloadLive(){
+  if(reloading) return;
+  reloading = true;
+  const el = document.getElementById('liveChip');
+  el?.classList.add('busy');
+  const gw = Store.currentGW;
+  try{
+    const [live, fx, status] = await Promise.all([API.liveGW(gw), API.fixtures(), API.eventStatus()]);
+    if(fx){ Store.fixtures = fx; Store.table = API.leagueTable(Store.teams, fx); }
+    if(status) Store.eventStatus = status;
+    if(live){
+      Store.applyLive(gw, live);
+      Store.posAvg[gw] = API.positionAverages(Store.pool, live);
+    }
+    delete loaded.performance?.totw?.[gw];      // Team of the Week moves while live
+    Store.persistSquad();                       // saves + store:change → re-render
+    toast(live ? `GW${gw} points updated` : "Couldn't reach FPL — try again");
+  }finally{
+    reloading = false;
+    el?.classList.remove('busy');
+    renderLiveChip();
+  }
+}
+
 /* ---------- ambient mood ----------
    Tints the background's floodlight orb toward how the most recently
    played gameweek actually went — purely cosmetic, computed from the
@@ -208,6 +258,7 @@ async function boot(){
     Store.currentGW = boot.currentGW;
     Store.viewGW    = boot.currentGW;
     Store.deadlines = boot.deadlines || {};
+    Store.chipWindows = boot.chipWindows || [];
 
     /* Legacy squads carry cap/vice flags on the player. Now that the
        armband is per-GW, seed those into the maps once the real GW is
@@ -229,11 +280,15 @@ async function boot(){
       Store.syncFromFPL(API).catch(err => console.warn('FPL sync failed:', err));
     }
 
-    const fx = await API.fixtures();
+    const [fx, status, setPieces] = await Promise.all([
+      API.fixtures(), API.eventStatus(), API.setPieceNotes()
+    ]);
     if(fx){
       Store.fixtures = fx;
       Store.table    = API.leagueTable(boot.teams, fx);
     }
+    Store.eventStatus   = status;
+    Store.setPieceNotes = setPieces || {};
 
     /* Position averages for every finished gameweek — needed to grade
        anyone. Used to be a plain sequential loop (one round trip at a
@@ -261,6 +316,8 @@ async function boot(){
   applyMoodColor();
   renderDeadline();
   setInterval(renderDeadline, 60000);
+  renderLiveChip();
+  document.getElementById('liveChip')?.addEventListener('click', reloadLive);
 
   /* re-render whatever page is showing */
   const active = document.querySelector('.tab.active')?.dataset.page || 'performance';
@@ -284,6 +341,7 @@ function renderActive(){
   loaded[active]?.render?.();
   applyMoodColor();
   renderDeadline();
+  renderLiveChip();
 }
 
 window.addEventListener('store:change', () => {

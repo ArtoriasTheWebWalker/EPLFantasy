@@ -348,7 +348,7 @@ export function chipSelectHTML(gw){
       <option value="" ${!cur ? 'selected' : ''}>None</option>
       ${opts}
     </select>
-    <div class="hint-line">Half ${half} of the season${half===1?` — these expire after GW${CONFIG.CHIP_HALF_END}`:''}.</div>`;
+    <div class="hint-line">Half ${half} of the season${half===1?` — these expire after GW${Store.chipHalfEnd()}`:''}.</div>`;
 }
 
 const CHIP_HINT = {

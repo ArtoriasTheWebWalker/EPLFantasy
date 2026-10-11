@@ -21,6 +21,13 @@ import { API }    from './api.js';
 import { Store }  from './store.js';
 import { Modal, chipEl, slotEl, searchBox, apiBanner, fixtureRunHTML, emptyNote, chipSelectHTML, wireSlideNav, toast, confirmDialog, statusBadgeHTML } from './ui.js';
 
+const PRICE_LABEL = {
+   5: { dir:'up',   label:'▲ rising tonight' },
+   4: { dir:'up',   label:'▲ likely to rise' },
+  '-4': { dir:'down', label:'▼ likely to fall' },
+  '-5': { dir:'down', label:'▼ falling tonight' },
+};
+
 const FLAGS = [
   { key:'hold',  label:'Hold'  },
   { key:'watch', label:'Watch' },
@@ -335,7 +342,7 @@ const Draft = {
 
     Modal.open(`
       <h3>Add a ${CONFIG.POS_LABEL[targetPos].replace(/s$/,'')}</h3>
-      <div class="m-meta">${Store.countPos(targetPos)}/${CONFIG.SQUAD[targetPos]} ${CONFIG.POS_LABEL[targetPos].toLowerCase()} · ${Store.squad.length}/15 total</div>
+      <div class="m-meta">${Store.countPos(targetPos)}/${CONFIG.SQUAD[targetPos]} ${CONFIG.POS_LABEL[targetPos].toLowerCase()} · ${Store.activeSquad().length}/15 total</div>
       ${sb.html}`);
     sb.bind();
   },
@@ -391,6 +398,8 @@ const Draft = {
       <details class="m-disclose">
         <summary>Next 5 fixtures</summary>
         ${runs}
+        ${(Store.setPieceNotes[p.teamId] || []).map(n =>
+          `<div class="hint-line">Set pieces: ${n.text}${n.link ? ` <a href="${n.link}" target="_blank" rel="noopener">source</a>` : ''}</div>`).join('')}
       </details>
 
       <details class="m-disclose">
@@ -566,7 +575,7 @@ const Draft = {
         <div>
           <div class="cand-name">${c.name}${statusBadgeHTML(pool?.status, pool?.news)}</div>
           <div class="cand-sub">${c.team} · ${c.pos} · £${c.price.toFixed(1)}m
-            ${move ? `<span class="price-move ${move}">${move==='up' ? '▲ rising tonight' : '▼ falling tonight'}</span>` : ''}
+            ${move ? `<span class="price-move ${move.dir}">${move.label}</span>` : ''}
           </div>
         </div>
         <button class="cand-x" title="Remove from shortlist">✕</button>
@@ -621,14 +630,14 @@ const Draft = {
     return card;
   },
 
-  /* Verified against a real price change: everything that moved sat
-     >=100%, the highest that didn't was 100.3% — so the threshold is
-     exact, not a rough cutoff. offset 0 is tonight; anything further
-     out is too likely to shift before it matters to flag here. */
+  /* FPL's own verdict for tonight, the same field its Price Changes
+     page reads: ±5 very likely, ±4 likely, anything else no badge.
+     (±5 lines up with the >=100% threshold verified earlier.) A
+     locked player can't move until the lock lifts, whatever the %. */
   priceMoveTonight(pool){
-    const p0 = pool?.priceChange?.find(x => x.offset === 0);
-    if(!p0 || !Number.isFinite(p0.percent) || Math.abs(p0.percent) < 100) return null;
-    return p0.percent > 0 ? 'up' : 'down';
+    if(pool?.priceLockedUntil && pool.priceLockedUntil > Date.now()) return null;
+    const l = pool?.priceChange?.find(x => x.offset === 0)?.likelihood;
+    return PRICE_LABEL[l] || null;
   },
 
   openAddCandidate(pos){

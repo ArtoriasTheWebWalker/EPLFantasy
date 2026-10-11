@@ -167,6 +167,9 @@ export const Store = {
   fixtures  : [],
   table     : [],
   posAvg    : {},     // { gw: {GK,DEF,MID,FWD} }
+  chipWindows : [],   // [{ code, start, stop }] from bootstrap.chips
+  eventStatus : null, // FPL event-status: live / provisional / confirmed
+  setPieceNotes: {},  // { teamId: [{ text, link }] }
   currentGW : 1,
   viewGW    : 1,
   seasonMode: false,
@@ -537,9 +540,14 @@ export const Store = {
   chipOf(gw){ return this.chips[gw] || null; },
 
   /* Which half of the season a gameweek belongs to. You get one of
-     each chip per half, and the first set expires at the GW19
-     deadline rather than carrying over. */
-  chipHalf(gw){ return gw <= CONFIG.CHIP_HALF_END ? 1 : 2; },
+     each chip per half, and the first set expires at its last GW
+     rather than carrying over. The engine's own chip windows decide
+     where that line is; the config value is only a fallback. */
+  chipHalfEnd(){
+    const stops = this.chipWindows.map(w => w.stop).filter(Number.isFinite);
+    return stops.length ? Math.min(...stops) : CONFIG.CHIP_HALF_END;
+  },
+  chipHalf(gw){ return gw <= this.chipHalfEnd() ? 1 : 2; },
 
   /* Where this chip was already played in the same half, if anywhere.
      Returns the gameweek number, or null. */
@@ -563,6 +571,13 @@ export const Store = {
       save(CONFIG.STORE.chips, this.chips);
       emit('chips');
       return { ok:true };
+    }
+
+    /* the engine's window, e.g. Wildcard and Free Hit open at GW2 */
+    const wins = this.chipWindows.filter(w => w.code === code);
+    if(wins.length && !wins.some(w => gw >= w.start && gw <= w.stop)){
+      const from = Math.min(...wins.map(w => w.start));
+      return { ok:false, reason:`${this.CHIP_LABEL[code]} can't be played in GW${gw} — FPL opens it from GW${from}.` };
     }
 
     const half  = this.chipHalf(gw);
@@ -659,13 +674,46 @@ export const Store = {
   matchesDone(player, gw){
     return (this.fixtures || [])
       .filter(f => f.gw === gw && (f.homeId === player.teamId || f.awayId === player.teamId))
-      .every(f => f.finishedProvisional ?? f.finished);
+      .every(f => f.finished);
   },
 
   /* True once FPL has data-checked every fixture of `gw`. Until then
      the official app shows a live sum, not the stored history total. */
   gwFinished(gw){
-    return (this.fixtures || []).filter(f => f.gw === gw).every(f => f.finished);
+    return (this.fixtures || []).filter(f => f.gw === gw).every(f => f.dataChecked ?? f.finished);
+  },
+
+  /* Kicked off and not yet data-checked — the window in which the
+     official Points page offers "Reload Points". */
+  gwLive(gw){
+    const fx = (this.fixtures || []).filter(f => f.gw === gw);
+    return fx.some(f => f.started) && !this.gwFinished(gw);
+  },
+
+  /* Fold one event/{gw}/live/ pull into every squad row, so a reload
+     costs one request instead of one element-summary per player. Live
+     totals already sum a double gameweek and include provisional bonus. */
+  applyLive(gw, liveMap){
+    for(const p of this.squad){
+      const l = liveMap?.[p.id];
+      if(!l) continue;
+      p.history = p.history || [];
+      const row = p.history.find(h => h.gw === gw);
+      if(row){ row.points = l.points; row.minutes = l.minutes; }
+      else if(l.minutes > 0 || l.points){ p.history.push({ gw, points:l.points, minutes:l.minutes }); p.history.sort((a,b)=>a.gw-b.gw); }
+    }
+  },
+
+  /* Points that sat on the bench. A linked account takes FPL's own
+     figure; otherwise it's the bench players auto-sub didn't bring on.
+     Zero under Bench Boost, since the bench scored. */
+  benchPointsFor(gw){
+    const hist = this.gwHistory[gw];
+    if(Number.isFinite(hist?.pointsOnBench) && this.gwFinished(gw)) return hist.pointsOnBench;
+    if(this.chipOf(gw) === 'bboost') return 0;
+    const xi = new Set(this.autoSubStarters(gw).map(p => p.id));
+    return this.benchForGW(gw).filter(p => !xi.has(p.id))
+      .reduce((s, p) => s + (this.pointsIn(p, gw) ?? 0), 0);
   },
 
   /* The XI as it stands right now, on the working (not-yet-frozen)
@@ -810,7 +858,7 @@ export const Store = {
     const gk = this.countStart('GK');
     if(gk > 1) return 'Only one goalkeeper can start.';
 
-    if(this.squad.length !== CONFIG.SQUAD.TOTAL) return null;   // still building
+    if(this.activeSquad().length !== CONFIG.SQUAD.TOTAL) return null;   // still building — retired rows never count
 
     if(gk !== 1) return 'Exactly one goalkeeper must start.';
     for(const pos of ['DEF','MID','FWD']){

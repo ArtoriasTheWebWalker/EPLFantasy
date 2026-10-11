@@ -27,12 +27,12 @@ async function getJSON(path){
 
 /* ---------- cache ---------- */
 
-function readCache(key){
+function readCache(key, ttl = CONFIG.CACHE_TTL_MS){
   try{
     const raw = localStorage.getItem(key);
     if(!raw) return null;
     const { at, data } = JSON.parse(raw);
-    if(Date.now() - at > CONFIG.CACHE_TTL_MS) return null;
+    if(Date.now() - at > ttl) return null;
     return data;
   }catch{ return null; }
 }
@@ -92,7 +92,7 @@ export const API = {
   ------------------------------------------------- */
   async bootstrap({ force=false } = {}){
     if(!force){
-      const cached = readCache(CONFIG.STORE.bootstrap);
+      const cached = readCache(CONFIG.STORE.bootstrap, CONFIG.BOOTSTRAP_TTL_MS);
       if(cached){ this.online = true; return cached; }
     }
 
@@ -121,14 +121,17 @@ export const API = {
         selected: parseFloat(e.selected_by_percent) || 0,
         status  : e.status,            // a=available, i=injured, d=doubtful
         news    : e.news || '',
-        /* progress toward tonight's price move, not a probability —
-           verified against real price changes: everything that moved
-           sat >=100%, the highest that didn't was 100.3%. offset 0 is
-           tonight, 1 tomorrow, etc. Kept raw; Store interprets it. */
+        /* offset 0 is tonight, 1 tomorrow, etc. FPL sends percent as a
+           STRING ("7.2") — left raw it never passed Number.isFinite, so
+           the old badge never showed. likelihood is FPL's own verdict
+           (±5 very likely, ±4 likely), what its Price Changes page reads;
+           a locked player can't move at all until priceLockedUntil. */
         priceChange: (e.price_change_projections || []).map(pc => ({
-          offset : pc.offset,
-          percent: pc.projected_percent
-        }))
+          offset    : pc.offset,
+          percent   : Number(pc.projected_percent),
+          likelihood: pc.likelihood ?? 0
+        })),
+        priceLockedUntil: e.price_change_locked_until ? Date.parse(e.price_change_locked_until) : null
       }));
 
       const currentEvent = raw.events.find(ev=>ev.is_current)
@@ -141,6 +144,8 @@ export const API = {
         teamById,
         currentGW : currentEvent ? currentEvent.id : 1,
         finishedGW: raw.events.filter(ev=>ev.finished).length,
+        /* chip windows straight from the engine, e.g. wildcard GW2–19 */
+        chipWindows: (raw.chips || []).map(c => ({ code:c.name, start:c.start_event, stop:c.stop_event })),
         /* Deadline per gameweek, epoch ms. Needed because "current" and
            "still editable" are NOT the same thing: a gameweek stays
            is_current for days after its deadline has passed, and edits
@@ -237,6 +242,37 @@ export const API = {
     }
   },
 
+  /* Per matchday: points '' | 'l' | 'p' | 'r' (not started / live /
+     provisional / confirmed), bonus_added. Never cached — it's live. */
+  async eventStatus(){
+    try{ return await getJSON(CONFIG.ENDPOINTS.eventStatus); }
+    catch(err){ this.lastError = err.message; return null; }
+  },
+
+  /* FPL's Team of the Week for one finished-or-live GW. */
+  async dreamTeam(gw){
+    try{
+      const raw = await getJSON(CONFIG.ENDPOINTS.dreamTeam.replace('{gw}', gw));
+      return { top: raw.top_player || null, team: raw.team || [] };
+    }catch(err){ this.lastError = err.message; return null; }
+  },
+
+  /* { [teamId]: [{ text, link }] }, cached like bootstrap. */
+  async setPieceNotes(){
+    const key = 'fpl2627_setpieces';
+    const cached = readCache(key, CONFIG.BOOTSTRAP_TTL_MS);
+    if(cached) return cached;
+    try{
+      const raw = await getJSON(CONFIG.ENDPOINTS.setPieceNotes);
+      const out = {};
+      (raw.teams || []).forEach(t => {
+        out[t.id] = (t.notes || []).map(n => ({ text:n.info_message, link:n.source_link || '' }));
+      });
+      writeCache(key, out);
+      return out;
+    }catch(err){ this.lastError = err.message; return null; }
+  },
+
   /* -------------------------------------------------
      fixtures() — all 380 matches, normalised.
   ------------------------------------------------- */
@@ -250,11 +286,12 @@ export const API = {
         awayId  : f.team_a,
         homeScore: f.team_h_score,
         awayScore: f.team_a_score,
-        finished: f.finished,
-        /* full time, before FPL's data check flips `finished` (which
-           can lag hours). The official Points page reads this one. */
-        finishedProvisional: f.finished_provisional,
-        started : f.started,
+        /* full time — FPL's finished_provisional, which the official
+           app uses for "FT". Its own `finished` waits for the data
+           check and can lag hours; that one is kept as dataChecked. */
+        finished   : f.finished_provisional ?? f.finished,
+        dataChecked: f.finished,
+        started    : f.started,
         kickoff : f.kickoff_time
       }));
     }catch(err){

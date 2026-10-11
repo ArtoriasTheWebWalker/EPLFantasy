@@ -17,7 +17,7 @@
    so old entries get swept on the next activate.
 ===================================================== */
 
-const CACHE_NAME = 'fplc-shell-v2';   // v2: forces a clean cache after the Table page restructure
+const CACHE_NAME = 'fplc-shell-v3';   // v3: live chip + Team of the Week need the new HTML and JS together
 
 const SHELL = [
   './',
