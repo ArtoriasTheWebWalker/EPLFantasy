@@ -72,6 +72,7 @@ export const CONFIG = {
     lineups   : 'fpl2627_lineups',         // { [gw]: { memberIds, starterIds } }
     lastGW    : 'fpl2627_last_known_gw',   // number — last currentGW we saw
     manager   : 'fpl2627_manager_id',      // linked FPL manager (integer)
+    syncCode  : 'fpl2627_sync_code',       // cross-device sync code (read by sync.js and the Claude-team guard)
     entryMeta : 'fpl2627_entry_meta',      // { teamName, rank, ... }
     chips     : 'fpl2627_chips',           // { [gw]: '3xc'|'bboost'|'wildcard'|'freehit' }
     gwHistory : 'fpl2627_gw_history',      // { [gw]: {points, transferCost, ...} } from FPL entryHistory

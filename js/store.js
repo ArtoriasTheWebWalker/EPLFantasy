@@ -1250,8 +1250,9 @@ export const Store = {
       vices:       this.vices,
       lineups:     this.lineups,
       lastKnownGW: this.lastKnownGW,
-      managerId:   this.managerId,
-      entryMeta:   this.entryMeta,
+      /* never push a manager link to Claude's cloud key */
+      managerId:   this.isClaudeTeam() ? null : this.managerId,
+      entryMeta:   this.isClaudeTeam() ? null : this.entryMeta,
       chips:       this.chips,
       gwHistory:   this.gwHistory,
     };
@@ -1551,7 +1552,18 @@ export const Store = {
      candidates are always preserved.
   ================================================= */
 
+  /* A claude- sync code is Claude's own team in the Ai vs Human match.
+     Linking an FPL account there makes syncFromFPL rebuild it from that
+     account and push the result to Claude's cloud key — which happened
+     on 11 Oct 2026 and had to be restored from a backup. So that code
+     can never be linked, sync from FPL, or push a manager link. */
+  isClaudeTeam(){
+    try{ return (localStorage.getItem(CONFIG.STORE.syncCode) || '').startsWith('claude-'); }
+    catch{ return false; }
+  },
+
   linkManager(id){
+    if(this.isClaudeTeam()) return { ok:false, reason:"This is Claude's team — an FPL account can't be linked to it. Switch to your own sync code first." };
     const n = parseInt(id, 10);
     if(!Number.isFinite(n) || n <= 0) return { ok:false, reason:'Manager id must be a positive number' };
     this.managerId = n;
@@ -1579,6 +1591,13 @@ export const Store = {
      Leaves untouched: draft (notes/flags), candidates. */
   async syncFromFPL(API){
     if(!this.managerId) return { ok:false, reason:'No FPL account linked' };
+    /* a browser that was linked before Claude's code was entered keeps
+       the id locally (importState never clears it) — drop it here, the
+       one place every overwrite path goes through, instead of syncing */
+    if(this.isClaudeTeam()){
+      this.unlinkManager();
+      return { ok:false, reason:"Unlinked: Claude's team never syncs from an FPL account." };
+    }
     if(!API || !this.pool.length) return { ok:false, reason:'API bootstrap must run first' };
 
     const profile = await API.entry(this.managerId);

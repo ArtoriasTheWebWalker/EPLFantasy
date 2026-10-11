@@ -15,12 +15,13 @@
      • openSettings — the ☁ modal to set/clear the code
 ===================================================== */
 
+import { CONFIG } from './config.js';
 import { Store } from './store.js';
 import { API }   from './api.js';
 import { Modal, choice, confirmDialog } from './ui.js';
 
 const SYNC_BASE = 'https://fpl-sync.abdulelah12012.workers.dev';
-const CODE_KEY  = 'fpl2627_sync_code';
+const CODE_KEY  = CONFIG.STORE.syncCode;
 const TS_KEY    = 'fpl2627_updated_at';
 const MIN_LEN   = 12;
 const DEBOUNCE  = 1200;

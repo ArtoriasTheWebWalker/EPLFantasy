@@ -570,4 +570,28 @@ assert.deepEqual(Store.lineups[6].starterIds, [301, 303], 'a future week snapsho
   assert.ok(Store._lineupIssue(), 'two defenders is illegal even with a retired row in the squad');
 }
 
-console.log('ok — 112 assertions passed');
+/* --- Claude's team can never be linked to an FPL account ------------
+   11 Oct 2026: manager 165309 was entered on Claude's sync code and
+   syncFromFPL rebuilt Claude's squad and GW5–6 from that account. */
+{
+  localStorage.setItem('fpl2627_sync_code', 'claude-71d284bfd2d0c489a4');
+  Store.managerId = null; Store.entryMeta = null;
+  assert.equal(Store.linkManager(165309).ok, false, 'linking is refused on a claude- code');
+  assert.equal(Store.managerId, null);
+
+  /* a browser linked before the code was entered keeps the id locally */
+  Store.managerId = 165309; Store.entryMeta = { totalPoints: 999 };
+  const st = Store.exportState();
+  assert.equal(st.managerId, null, "the link is never pushed to Claude's cloud key");
+  assert.equal(st.entryMeta, null);
+  const r = await Store.syncFromFPL({});
+  assert.equal(r.ok, false, "syncFromFPL refuses on Claude's team");
+  assert.equal(Store.managerId, null, 'and drops the leftover link instead');
+
+  localStorage.setItem('fpl2627_sync_code', 'abdulelah-own-code-123');
+  assert.equal(Store.linkManager(165309).ok, true, 'any other code links as before');
+  Store.unlinkManager();
+  localStorage.removeItem('fpl2627_sync_code');
+}
+
+console.log('ok — 119 assertions passed');
